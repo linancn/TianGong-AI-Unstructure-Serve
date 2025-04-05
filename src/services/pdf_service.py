@@ -28,6 +28,8 @@ def unstructure_pdf(file_name, languages=["chi_sim"], extract_images=False):
         infer_table_structure=True,
         hi_res_model_name="yolox",
         languages=languages,
+        ocr_agent="unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle",
+        table_ocr_agent="unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle",
     )
 
     filtered_elements = [
