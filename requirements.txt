@@ -1,4 +1,5 @@
 fastapi
+magic-pdf[full]
 openai
 paddlepaddle-gpu
 # paddlepaddle-cpu

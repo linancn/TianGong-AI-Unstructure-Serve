@@ -145,3 +145,6 @@ dmypy.json
 .pytype/
 
 .secrets/secrets.toml
+
+output
+input
