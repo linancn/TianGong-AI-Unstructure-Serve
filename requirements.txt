@@ -2,7 +2,7 @@ fastapi
 magic-pdf[full]
 openai
 paddlepaddle-gpu
-# paddlepaddle-cpu
+# paddlepaddle
 pdf2image
 python-dotenv
 py-zerox
