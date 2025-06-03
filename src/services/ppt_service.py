@@ -33,7 +33,7 @@ def unstructure_ppt(file_name):
         else:
             element_text.append(str(slide_elements))
 
-        combined_text = f"{slide_text.strip()}\n\n{notes_text.strip()}\n\n{' '.join(element_text)}"
+        combined_text = f"{slide_text.strip()}\n{notes_text.strip()}\n{' '.join(element_text)}"
 
         page_number = i + 1
         text_list.append((combined_text, page_number))

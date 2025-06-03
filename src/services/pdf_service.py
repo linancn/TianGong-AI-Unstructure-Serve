@@ -74,7 +74,7 @@ def unstructure_pdf(file_name, languages=["chi_sim"], extract_images=False):
         elif isinstance(chunk, Table):
             if text_list:
                 text_list[-1] = (
-                    text_list[-1][0] + "\n\n" + chunk.metadata.text_as_html,
+                    text_list[-1][0] + "\n" + chunk.metadata.text_as_html,
                     text_list[-1][1],
                 )
             else:
