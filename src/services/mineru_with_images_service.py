@@ -104,7 +104,7 @@ def mineru_service(file_path):
                 # 将结果添加到响应中
                 result_items.append(
                     TextElementWithPageNum(
-                        text=f"{image_text(item)}\n\nAI Analysis: {vision_result}",
+                        text=f"{image_text(item)}\nImage Description: {vision_result}",
                         page_number=item["page_idx"] + 1,
                     )
                 )
