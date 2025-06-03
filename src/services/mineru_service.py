@@ -37,7 +37,6 @@ def mineru_service(file_path):
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         image_writer = FileBasedDataWriter(tmp_dir)
-        image_dir = os.path.basename(tmp_dir)
         if ds.classify() == SupportedPdfParseMethod.OCR:
             infer_result = ds.apply(doc_analyze, ocr=True)
             pipe_result = infer_result.pipe_ocr_mode(image_writer)
@@ -46,7 +45,7 @@ def mineru_service(file_path):
             pipe_result = infer_result.pipe_txt_mode(image_writer)
 
         # 传 image_dir_or_bucket_prefix
-        content_list_content = pipe_result.get_content_list(image_dir)
+        content_list_content = pipe_result.get_content_list(tmp_dir)
 
         response = ResponseWithPageNum(
             result=[
