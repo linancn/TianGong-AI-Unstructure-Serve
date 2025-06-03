@@ -9,7 +9,22 @@ from src.models.models import ResponseWithPageNum, TextElementWithPageNum
 
 
 def image_text(item):
-    return "\n".join([*item.get("img_caption", []), *item.get("img_footnote", [])])
+    captions = item.get("img_caption") or []
+    footnotes = item.get("img_footnote") or []
+    return "\n".join([*captions, *footnotes])
+
+
+def table_text(item):
+    return "\n".join(
+        filter(
+            None,
+            [
+                "\n".join(item.get("table_caption", [])),
+                item.get("table_body", ""),
+                "\n".join(item.get("table_footnote", [])),
+            ],
+        )
+    )
 
 
 def mineru_service(file_path):
@@ -37,7 +52,9 @@ def mineru_service(file_path):
             result=[
                 TextElementWithPageNum(
                     text=(
-                        item["text"] if item["type"] in ("text", "equation") else image_text(item)
+                        item["text"]
+                        if item["type"] in ("text", "equation")
+                        else table_text(item) if item["type"] == "table" else image_text(item)
                     ),
                     page_number=item["page_idx"] + 1,
                 )
@@ -47,6 +64,14 @@ def mineru_service(file_path):
                     or (
                         item["type"] == "image"
                         and (item.get("img_caption") or item.get("img_footnote"))
+                    )
+                    or (
+                        item["type"] == "table"
+                        and (
+                            item.get("table_caption")
+                            or item.get("table_body")
+                            or item.get("table_footnote")
+                        )
                     )
                 )
             ]
