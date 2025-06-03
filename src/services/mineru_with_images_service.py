@@ -95,7 +95,7 @@ def mineru_service(file_path):
                     prompt_parts.append(f"Context before: {context_before}")
                 if context_after.strip():
                     prompt_parts.append(f"Context after: {context_after}")
-                
+
                 vision_result = vision_completion(
                     img_path,
                     "\n".join(prompt_parts),
