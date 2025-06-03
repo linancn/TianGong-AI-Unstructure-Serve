@@ -86,9 +86,19 @@ def mineru_service(file_path):
                 footnotes = "\n".join(item.get("img_footnote") or [])
 
                 # 调用vision服务
+                prompt_parts = []
+                if captions.strip():
+                    prompt_parts.append(f"Image caption: {captions}")
+                if footnotes.strip():
+                    prompt_parts.append(f"Image footnote: {footnotes}")
+                if context_before.strip():
+                    prompt_parts.append(f"Context before: {context_before}")
+                if context_after.strip():
+                    prompt_parts.append(f"Context after: {context_after}")
+                
                 vision_result = vision_completion(
                     img_path,
-                    f"Image caption: {captions}\nImage footnote: {footnotes}\nContext before: {context_before}\nContext after: {context_after}",
+                    "\n".join(prompt_parts),
                 )
 
                 # 将结果添加到响应中
