@@ -50,8 +50,21 @@ def mineru_service(file_path):
 
         # 处理内容并添加上下文
         result_items = []
+        total_images = sum(
+            1 for item in content_list_content if item["type"] == "image" and "img_path" in item
+        )
+        image_count = 0
+
+        print(f"Processing document: Found {total_images} images to analyze")
+
         for i, item in enumerate(content_list_content):
             if item["type"] == "image" and "img_path" in item:
+
+                image_count += 1
+                print(
+                    f"Processing image {image_count}/{total_images} on page {item['page_idx'] + 1}..."
+                )
+
                 # 获取上下文（前后两个文本元素）
                 context_before = ""
                 context_after = ""
@@ -96,10 +109,12 @@ def mineru_service(file_path):
                 if context_after.strip():
                     prompt_parts.append(f"Context after: {context_after}")
 
+                print(f"Calling vision completion for image {image_count}/{total_images}...")
                 vision_result = vision_completion(
                     img_path,
                     "\n".join(prompt_parts),
                 )
+                print(f"✓ Vision analysis complete for image {image_count}/{total_images}")
 
                 # 将结果添加到响应中
                 result_items.append(
@@ -134,6 +149,6 @@ def mineru_service(file_path):
                         page_number=item["page_idx"] + 1,
                     )
                 )
-
+        print(f"Completed processing all {total_images} images")
         response = ResponseWithPageNum(result=result_items)
         return response
