@@ -13,7 +13,7 @@ def encode_image(image_path):
         return base64.b64encode(image_file.read()).decode("utf-8")
 
 
-def vision_completion(image_path: str, context: str = "") -> str:
+def vision_completion_openai(image_path: str, context: str = "") -> str:
     base64_image = encode_image(image_path)
     prompt = "What is in this image? Only return neat facts."
 

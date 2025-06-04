@@ -1,7 +1,7 @@
 import tempfile
 
 from dotenv import load_dotenv
-from src.services.vision_service import vision_completion
+from src.services.vision_service_openai import vision_completion_openai
 from unstructured.chunking.title import chunk_by_title
 from unstructured.cleaners.core import clean, group_broken_paragraphs
 from unstructured.documents.elements import (
@@ -55,7 +55,7 @@ def unstructure_pdf(file_name, languages=["chi_sim"], extract_images=False):
                 width = abs(point2[0] - point1[0])
                 height = abs(point2[1] - point1[1])
                 if width >= min_image_width and height >= min_image_height:
-                    element.text = vision_completion(element.metadata.image_path)
+                    element.text = vision_completion_openai(element.metadata.image_path)
 
     chunks = chunk_by_title(
         elements=filtered_elements,

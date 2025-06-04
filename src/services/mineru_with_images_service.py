@@ -6,7 +6,8 @@ from magic_pdf.model.doc_analyze_by_custom_model import doc_analyze
 from magic_pdf.config.enums import SupportedPdfParseMethod
 
 from src.models.models import ResponseWithPageNum, TextElementWithPageNum
-from src.services.vision_service import vision_completion
+# from src.services.vision_service_openai import vision_completion_openai
+from src.services.vision_service_genimi import vision_completion_genimi
 
 
 def image_text(item):
@@ -110,7 +111,11 @@ def mineru_service(file_path):
                     prompt_parts.append(f"Context after: {context_after}")
 
                 print(f"Calling vision completion for image {image_count}/{total_images}...")
-                vision_result = vision_completion(
+                # vision_result = vision_completion_openai(
+                #     img_path,
+                #     "\n".join(prompt_parts),
+                # )
+                vision_result = vision_completion_genimi(
                     img_path,
                     "\n".join(prompt_parts),
                 )
