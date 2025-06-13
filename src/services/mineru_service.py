@@ -1,5 +1,6 @@
 import os
 import tempfile
+import re
 from magic_pdf.data.data_reader_writer import FileBasedDataWriter, FileBasedDataReader
 from magic_pdf.data.dataset import PymuDocDataset
 from magic_pdf.model.doc_analyze_by_custom_model import doc_analyze
@@ -8,23 +9,37 @@ from magic_pdf.config.enums import SupportedPdfParseMethod
 from src.models.models import ResponseWithPageNum, TextElementWithPageNum
 
 
+def clean_text(text):
+    """Clean text to remove surrogate characters and other problematic encodings"""
+    if not text:
+        return ""
+    
+    # Remove surrogate characters
+    text = re.sub(r'[\ud800-\udfff]', '', text)
+    
+    # Encode to utf-8 and decode, replacing errors
+    try:
+        text = text.encode('utf-8', errors='ignore').decode('utf-8')
+    except UnicodeError:
+        text = text.encode('ascii', errors='ignore').decode('ascii')
+    
+    return text
+
 def image_text(item):
     captions = item.get("img_caption") or []
     footnotes = item.get("img_footnote") or []
-    return "\n".join([*captions, *footnotes])
+    combined_text = "\n".join([*captions, *footnotes])
+    return clean_text(combined_text)
 
 
 def table_text(item):
-    return "\n".join(
-        filter(
-            None,
-            [
-                "\n".join(item.get("table_caption", [])),
-                item.get("table_body", ""),
-                "\n".join(item.get("table_footnote", [])),
-            ],
-        )
-    )
+    text_parts = [
+        "\n".join(item.get("table_caption", [])),
+        item.get("table_body", ""),
+        "\n".join(item.get("table_footnote", [])),
+    ]
+    combined_text = "\n".join(filter(None, text_parts))
+    return clean_text(combined_text)
 
 
 def mineru_service(file_path):
@@ -51,7 +66,7 @@ def mineru_service(file_path):
             result=[
                 TextElementWithPageNum(
                     text=(
-                        item["text"]
+                        clean_text(item["text"])
                         if item["type"] in ("text", "equation")
                         else table_text(item) if item["type"] == "table" else image_text(item)
                     ),
