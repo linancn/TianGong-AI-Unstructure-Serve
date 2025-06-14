@@ -24,6 +24,8 @@ def unstructure_docx(file_name):
     for chunk in chunks:
         if isinstance(chunk, CompositeElement):
             text = chunk.text
+            if chunk.metadata.text_as_html:
+                text += "\nTable Content:\n" + chunk.metadata.text_as_html
             text_list.append(text)
         elif isinstance(chunk, Table):
             if text_list:
