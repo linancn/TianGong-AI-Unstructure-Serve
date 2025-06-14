@@ -17,7 +17,7 @@ async def mineru(file: UploadFile = File(...)):
     """
     This endpoint allows you to extract text from a document by MinerU.
     """
-    with tempfile.NamedTemporaryFile(delete=True) as tmp:
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=True) as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
 

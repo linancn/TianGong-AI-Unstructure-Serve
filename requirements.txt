@@ -1,6 +1,6 @@
 fastapi
 google-genai
-magic-pdf[full]
+mineru[all]
 openai
 paddlepaddle-gpu
 # paddlepaddle

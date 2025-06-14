@@ -13,7 +13,7 @@ from src.routers import (
     docx_router,
     ppt_router,
     mineru_router,
-    mineru_with_images_router,
+    # mineru_with_images_router,
 )
 
 load_dotenv()
@@ -49,4 +49,4 @@ app.include_router(omniai_router.router)
 app.include_router(docx_router.router)
 app.include_router(ppt_router.router)
 app.include_router(mineru_router.router)
-app.include_router(mineru_with_images_router.router)
+# app.include_router(mineru_with_images_router.router)

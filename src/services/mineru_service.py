@@ -1,10 +1,7 @@
 import os
 import tempfile
 import re
-from magic_pdf.data.data_reader_writer import FileBasedDataWriter, FileBasedDataReader
-from magic_pdf.data.dataset import PymuDocDataset
-from magic_pdf.model.doc_analyze_by_custom_model import doc_analyze
-from magic_pdf.config.enums import SupportedPdfParseMethod
+from src.services.mineru_service_full import parse_doc
 
 from src.models.models import ResponseWithPageNum, TextElementWithPageNum
 
@@ -13,17 +10,18 @@ def clean_text(text):
     """Clean text to remove surrogate characters and other problematic encodings"""
     if not text:
         return ""
-    
+
     # Remove surrogate characters
-    text = re.sub(r'[\ud800-\udfff]', '', text)
-    
+    text = re.sub(r"[\ud800-\udfff]", "", text)
+
     # Encode to utf-8 and decode, replacing errors
     try:
-        text = text.encode('utf-8', errors='ignore').decode('utf-8')
+        text = text.encode("utf-8", errors="ignore").decode("utf-8")
     except UnicodeError:
-        text = text.encode('ascii', errors='ignore').decode('ascii')
-    
+        text = text.encode("ascii", errors="ignore").decode("ascii")
+
     return text
+
 
 def image_text(item):
     captions = item.get("img_caption") or []
@@ -43,25 +41,9 @@ def table_text(item):
 
 
 def mineru_service(file_path):
-    # read bytes
-    reader = FileBasedDataReader("")
-    pdf_bytes = reader.read(file_path)
-
-    # dataset
-    ds = PymuDocDataset(pdf_bytes)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        image_writer = FileBasedDataWriter(tmp_dir)
-        if ds.classify() == SupportedPdfParseMethod.OCR:
-            infer_result = ds.apply(doc_analyze, ocr=True)
-            pipe_result = infer_result.pipe_ocr_mode(image_writer)
-        else:
-            infer_result = ds.apply(doc_analyze, ocr=False)
-            pipe_result = infer_result.pipe_txt_mode(image_writer)
-
-        # 传 image_dir_or_bucket_prefix
-        content_list_content = pipe_result.get_content_list(tmp_dir)
-
+        content_list_content = parse_doc([file_path], tmp_dir)
         response = ResponseWithPageNum(
             result=[
                 TextElementWithPageNum(
