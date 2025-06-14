@@ -1,11 +1,14 @@
 import tempfile
-
+import os
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from src.models.models import ResponseWithPageNum
 from src.services.mineru_service import mineru_service
 
 router = APIRouter()
+
+# List of allowed file extensions
+ALLOWED_EXTENSIONS = [".pdf", ".png", ".jpeg", ".jpg"]
 
 
 @router.post(
@@ -16,8 +19,20 @@ router = APIRouter()
 async def mineru(file: UploadFile = File(...)):
     """
     This endpoint allows you to extract text from a document by MinerU.
+    Only PDF, PNG, JPEG, and JPG files are accepted.
     """
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=True) as tmp:
+    # Get file extension
+    _, file_ext = os.path.splitext(file.filename)
+    file_ext = file_ext.lower()
+
+    # Check if file extension is allowed
+    if file_ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}",
+        )
+
+    with tempfile.NamedTemporaryFile(suffix=file_ext, delete=True) as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
 

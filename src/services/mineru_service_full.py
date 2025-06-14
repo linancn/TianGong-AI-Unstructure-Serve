@@ -41,7 +41,7 @@ def do_parse(
     start_page_id=0,  # Start page ID for parsing, default is 0
     end_page_id=None,  # End page ID for parsing, default is None (parse all pages until the end of the document)
     return_content_list=True,  # Whether to return content lists
-): # Store all content lists if returning them
+):  # Store all content lists if returning them
 
     if backend == "pipeline":
         for idx, pdf_bytes in enumerate(pdf_bytes_list):
