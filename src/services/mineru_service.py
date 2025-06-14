@@ -43,7 +43,7 @@ def table_text(item):
 def mineru_service(file_path):
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        content_list_content = parse_doc([file_path], tmp_dir)
+        content_list_content, _ = parse_doc([file_path], tmp_dir)
         response = ResponseWithPageNum(
             result=[
                 TextElementWithPageNum(

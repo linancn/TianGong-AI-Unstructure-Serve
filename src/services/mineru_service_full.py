@@ -192,7 +192,7 @@ def do_parse(
 
     # Return content lists if requested
     if return_content_list:
-        return content_list
+        return content_list, local_md_dir
 
 
 def parse_doc(
