@@ -8,7 +8,7 @@ Setup `venv`:
 ```bash
 
 sudo apt-get install python3.12-dev
-udo apt-get install nvidia-cuda-toolkit
+sudo apt-get install nvidia-cuda-toolkit
 
 python3.12 -m venv .venv
 source .venv/bin/activate
