@@ -49,8 +49,6 @@ filter_patterns = [
     r"^\s*([ivxlcdm]+\.?|\d+\.?|\w+\.?)?\s*declaration\s+of\s+competing\s+interest\s*[:\.]?\s*$",
     r"^\s*([ivxlcdm]+\.?|\d+\.?|\w+\.?)?\s*online\s*[:\.]?\s*$",
     r"^\s*([ivxlcdm]+\.?|\d+\.?|\w+\.?)?\s*references?\s*[:\.]?\s*$",
-    r"^\s*([ivxlcdm]+\.?|\d+\.?|\w+\.?)?\s*supplementary\s+(information|materials)\s*[:\.]?\s*$",
-    r"^\s*([ivxlcdm]+\.?|\d+\.?|\w+\.?)?\s*supporting\s+information\s*[:\.]?\s*$",
 ]
 
 
