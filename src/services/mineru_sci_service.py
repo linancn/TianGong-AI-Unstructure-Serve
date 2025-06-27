@@ -43,11 +43,17 @@ def table_text(item):
 filter_patterns = [
     r"^\s*([ivxlcdm]+\.?|\d+\.?|\w+\.?)?\s*acknowledgements?\s*[:\.]?\s*$",
     r"^\s*([ivxlcdm]+\.?|\d+\.?|\w+\.?)?\s*acknowledgments?\s*[:\.]?\s*$",
+    r"^\s*([ivxlcdm]+\.?|\d+\.?|\w+\.?)?\s*author\s+contributions?\s*[:\.]?\s*$",
     r"^\s*([ivxlcdm]+\.?|\d+\.?|\w+\.?)?\s*bibliography\s*[:\.]?\s*$",
+    r"^\s*([ivxlcdm]+\.?|\d+\.?|\w+\.?)?\s*conflict\s+of\s+interest\s*[:\.]?\s*$",
     r"^\s*([ivxlcdm]+\.?|\d+\.?|\w+\.?)?\s*credit\s+authorship\s+contribution\s+statement\s*[:\.]?\s*$",
     r"^\s*([ivxlcdm]+\.?|\d+\.?|\w+\.?)?\s*data\s+availability\s*[:\.]?\s*$",
     r"^\s*([ivxlcdm]+\.?|\d+\.?|\w+\.?)?\s*declaration\s+of\s+competing\s+interest\s*[:\.]?\s*$",
+    r"^\s*([ivxlcdm]+\.?|\d+\.?|\w+\.?)?\s*declaration\s+of\s+interests?\s*[:\.]?\s*$",
+    r"^\s*([ivxlcdm]+\.?|\d+\.?|\w+\.?)?\s*declarations?\s*[:\.]?\s*$",
+    r"^\s*([ivxlcdm]+\.?|\d+\.?|\w+\.?)?\s*literature\s+cited\s*[:\.]?\s*$",
     r"^\s*([ivxlcdm]+\.?|\d+\.?|\w+\.?)?\s*online\s*[:\.]?\s*$",
+    r"^\s*([ivxlcdm]+\.?|\d+\.?|\w+\.?)?\s*r\s+e\s+f\s+e\s+r\s+e\s+n\s+c\s+e\s+s\s*[:\.]?\s*$",
     r"^\s*([ivxlcdm]+\.?|\d+\.?|\w+\.?)?\s*references?\s*[:\.]?\s*$",
 ]
 
