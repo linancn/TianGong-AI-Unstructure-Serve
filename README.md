@@ -28,6 +28,7 @@ pip install -r requirements.txt --upgrade
 wget https://gcore.jsdelivr.net/gh/opendatalab/MinerU@master/scripts/download_models_hf.py -O download_models_hf.py
 python download_models_hf.py
 
+pip freeze > requirements_freeze.txt
 ```
 
 Auto lint:

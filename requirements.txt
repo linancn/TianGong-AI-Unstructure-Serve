@@ -14,3 +14,4 @@ toml
 unstructured.PaddleOCR
 unstructured[all-docs]
 uvicorn[standard]
+torch<2.8
