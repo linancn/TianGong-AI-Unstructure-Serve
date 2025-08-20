@@ -1,5 +1,6 @@
 import os
 import tempfile
+import logging
 
 from src.models.models import ResponseWithPageNum, TextElementWithPageNum
 from src.services.mineru_service_full import parse_doc
@@ -62,7 +63,7 @@ def get_next_context(context_elements, cur_idx, n=2):
 def mineru_service(file_path):
     with tempfile.TemporaryDirectory() as tmp_dir:
         content_list_content, output_dir = parse_doc([file_path], tmp_dir)
-        # print(content_list_content)
+        # logging.info(content_list_content)
 
         # with open(os.path.join(tmp_dir, "content_list.json"), "w", encoding="utf-8") as f:
         #     import json
@@ -141,13 +142,13 @@ def mineru_service(file_path):
                 # 检查图片文件是否实际存在
                 img_path = os.path.join(output_dir, item["img_path"])
                 if not os.path.exists(img_path):
-                    print(
+                    logging.info(
                         f"Skipping image on page {item['page_idx'] + 1}: file not found at {img_path}"
                     )
                     continue
 
                 image_count += 1
-                print(
+                logging.info(
                     f"Processing image {image_count}/{total_images} on page {item['page_idx'] + 1}..."
                 )
 
@@ -193,16 +194,18 @@ def mineru_service(file_path):
                 if after_ctx.strip():
                     prompt_parts.append(f"Context after: {after_ctx}")
 
-                print(img_path)
-                print("\n".join(prompt_parts))
-                print(f"Calling vision completion for image {image_count}/{total_images}...")
+                logging.info(img_path)
+                logging.info("\n".join(prompt_parts))
+                logging.info(f"Calling vision completion for image {image_count}/{total_images}...")
 
                 try:
                     vision_result = vision_completion_genimi(
                         img_path,
                         "\n".join(prompt_parts),
                     )
-                    print(f"✓ Vision analysis complete for image {image_count}/{total_images}")
+                    logging.info(
+                        f"✓ Vision analysis complete for image {image_count}/{total_images}"
+                    )
 
                     # 将 vision 结果也插入 working_blocks，作为新的上下文块
                     vision_block = {
@@ -235,7 +238,7 @@ def mineru_service(file_path):
                         )
                     )
                 except Exception as e:
-                    print(f"Error processing image {image_count}/{total_images}: {str(e)}")
+                    logging.info(f"Error processing image {image_count}/{total_images}: {str(e)}")
                     # 即使vision失败，也可以输出原始caption/footnote
                     img_txt = image_text(item)
                     if img_txt.strip():
@@ -275,6 +278,6 @@ def mineru_service(file_path):
                     )
                 )
 
-        print(f"Completed processing all {total_images} images")
-        response = ResponseWithPageNum(result=result_items)
-        return response
+    logging.info(f"Completed processing all {total_images} images")
+    response = ResponseWithPageNum(result=result_items)
+    return response

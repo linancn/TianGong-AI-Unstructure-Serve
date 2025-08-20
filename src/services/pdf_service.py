@@ -1,4 +1,5 @@
 import tempfile
+import logging
 
 from dotenv import load_dotenv
 from src.services.vision_service_openai import vision_completion_openai
@@ -109,7 +110,7 @@ def unstructure_pdf(file_name, languages=["chi_sim"], extract_images=False):
 #     try:
 #         return process_pdf(record)
 #     except Exception as e:
-#         print(f"Error processing {record}: {str(e)}")
+#         logging.info(f"Error processing {record}: {str(e)}")
 #         return None
 
 
@@ -127,4 +128,4 @@ def unstructure_pdf(file_name, languages=["chi_sim"], extract_images=False):
 
 # cur.close()
 # conn.close()
-# print("Data unstructured successfully")
+# logging.info("Data unstructured successfully")
