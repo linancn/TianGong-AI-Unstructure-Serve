@@ -16,14 +16,15 @@ router = APIRouter()
 )
 async def ingest_to_weaviate(
     collection_name: str = Form(...),
+    user_id: str = Form(...),
     file: UploadFile = File(...),
 ):
     """使用 MinerU 解析上传文档并写入 Weaviate。
 
-    支持: .pdf, .png, .jpeg, .jpg
+    支持: .pdf
     source 字段使用原始文件名 (含扩展名)。
     """
-    allowed_ext = {".pdf", ".png", ".jpeg", ".jpg"}
+    allowed_ext = {".pdf"}
     filename = file.filename or "uploaded"
     _, ext = os.path.splitext(filename)
     ext = ext.lower()
@@ -41,7 +42,7 @@ async def ingest_to_weaviate(
                 (item.text, item.page_number) for item in mineru_resp.result if item.text.strip()
             ]
             summary = insert_text_chunks(
-                collection_name=collection_name,
+                collection_name=collection_name + user_id,
                 chunks_with_page=chunks_with_pages,
                 source=filename,  # 使用完整文件名
             )
