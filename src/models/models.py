@@ -28,3 +28,13 @@ class ResponseWithoutPageNum(BaseModel):
     def from_result(cls, result: List[Tuple[str, int]]):
         items = [TextElementWithoutPageNum(text=item) for item in result]
         return cls(result=items)
+
+
+class InsertSummary(BaseModel):
+    """Response model summarizing a Weaviate insertion."""
+
+    doc_id: str
+    inserted_chunks: int
+    collection: str
+    source: str
+    has_page_numbers: bool

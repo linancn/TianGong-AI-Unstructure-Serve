@@ -8,7 +8,7 @@ from typing import List, Tuple, Sequence, Union, Optional
 from weaviate.classes.config import Configure, DataType, Property, Tokenization
 
 # from weaviate.classes.init import Auth
-from tools.text_to_weaviate import merge_pickle_list, fix_utf8, num_tokens_from_string
+from src.services.tools.text_to_weaviate import merge_pickle_list, fix_utf8, num_tokens_from_string
 
 
 load_dotenv()
@@ -85,9 +85,25 @@ def create_collection_if_not_exists(
         ]
 
     def _default_vector_config():
+        """Return a default *vector_config* list compatible with newer client API.
+
+        IMPORTANT:
+            In Weaviate client >= 4.14 the preferred argument is ``vector_config``
+            (unifying vectorizer + vector index config). The helper
+            ``Configure.Vectors.text2vec_transformers`` returns the correct
+            ``_VectorConfigCreate`` object for this parameter. Previously this
+            code used ``Configure.NamedVectors.text2vec_transformers`` and passed
+            those objects to ``vector_config`` which is a type mismatch
+            (NamedVectors belong to the older / deprecated ``vectorizer_config``).
+
+            If you need a named multi‑vector setup you can supply a list of
+            multiple ``Configure.Vectors.*`` results each with a distinct
+            ``name=...``.
+        """
         return [
-            Configure.NamedVectors.text2vec_transformers(
-                name="content", source_properties=["content"]
+            Configure.Vectors.text2vec_transformers(
+                name="content",  # vector name
+                source_properties=["content"],  # which property(ies) to vectorize
             )
         ]
 
@@ -107,6 +123,7 @@ def create_collection_if_not_exists(
                 collection = client.collections.create(
                     name=collection_name,
                     properties=properties,
+                    # vector_config expects objects from Configure.Vectors.* helpers
                     vector_config=vector_config,
                 )
                 logging.info("Created collection '%s'", collection_name)

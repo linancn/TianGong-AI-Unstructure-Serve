@@ -15,6 +15,7 @@ from src.routers import (
     mineru_router,
     mineru_sci_router,
     mineru_with_images_router,
+    weaviate_router,
 )
 
 load_dotenv()
@@ -52,3 +53,4 @@ app.include_router(ppt_router.router)
 app.include_router(mineru_router.router)
 app.include_router(mineru_sci_router.router)
 app.include_router(mineru_with_images_router.router)
+app.include_router(weaviate_router.router)
