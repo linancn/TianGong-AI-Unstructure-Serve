@@ -28,7 +28,7 @@ def build_weaviate_collection_name(base: str, user_id: str) -> str:
     uid_clean = re.sub(r"[^0-9A-Za-z_]", "_", user_id).upper()
 
     # 拼接：推荐下划线作为分隔
-    name = f"{uid_clean}_{base_clean}"
+    name = f"KB_{uid_clean}_{base_clean}"
 
     # 可选：限制长度，避免名字过长（按需调整）
     if len(name) > 200:
