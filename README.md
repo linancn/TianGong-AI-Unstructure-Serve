@@ -73,6 +73,8 @@ nohup env MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=0 TABLE_OCR=paddle
 nohup env MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=1 TABLE_OCR=paddle OCR_AGENT=unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle uvicorn src.main:app --host 0.0.0.0 --port 8771 > uvicorn.log 2>&1 &
 nohup env MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=2 TABLE_OCR=paddle OCR_AGENT=unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle uvicorn src.main:app --host 0.0.0.0 --port 8772 > uvicorn.log 2>&1 &
 
+npm i -g pm2
+
 pm2 start "env MINERU_MODEL_SOURCE=modelscope \
   TABLE_OCR=paddle \
   OCR_AGENT=unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle \
@@ -81,4 +83,12 @@ pm2 start "env MINERU_MODEL_SOURCE=modelscope \
   --time \
   --output uvicorn.log \
   --error uvicorn.log
+
+pm2 status
+
+pm2 restart unstructured-uvicorn
+pm2 stop unstructured-uvicorn
+pm2 delete unstructured-uvicorn
+
+pm2 logs unstructured-uvicorn
 ```
