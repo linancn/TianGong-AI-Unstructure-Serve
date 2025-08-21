@@ -46,15 +46,12 @@ def create_collection_if_not_exists(
     - Backwards compatible with previous simple call (only name).
     - Allow callers to specify custom ``properties`` or ``vector_config``.
     - Race-safe: if two processes create concurrently, we recover gracefully.
-    - Optionally *ensure* (add) any missing properties when the collection already exists.
     - Allow client re-use (callers doing many operations can pass an existing client).
-    - Default schema includes a ``page_number`` INT property so downstream code can filter/aggregate by page.
 
     Args:
         collection_name: Target collection name.
         properties: Optional list of Property objects; if omitted, a default schema is used.
         vector_config: Optional vector configuration list; defaults to a single NamedVectors transformer over ``content``.
-        ensure_properties: If True, attempt to add any provided properties missing from an existing collection (best-effort).
         client: Optional existing connected client; if not provided a new one is created and closed here.
 
     Returns:
@@ -77,6 +74,11 @@ def create_collection_if_not_exists(
             Property(
                 name="doc_chunk_id",
                 data_type=DataType.TEXT,
+            ),
+            Property(
+                name="tags",
+                data_type=DataType.TEXT_ARRAY,
+                tokenization=Tokenization.FIELD,
             ),
             Property(
                 name="page_number",
@@ -141,14 +143,7 @@ def create_collection_if_not_exists(
             collection = client.collections.get(collection_name)
             logging.debug("Collection '%s' already exists.", collection_name)
 
-        # Best-effort ensure missing properties (cannot remove/alter existing types here).
-        if ensure_properties and properties:
-            for prop in properties:
-                try:
-                    collection.config.add_property(prop)
-                except Exception:
-                    # Ignore if property already present or server disallows after creation.
-                    pass
+    # 旧逻辑: 动态补字段已移除。现在假定集合是用最新 schema 创建的；如需修改请重建集合。
 
         return collection
     finally:
@@ -163,6 +158,7 @@ def insert_text_chunks(
     max_tokens: int = 4000,
     batch_size: int = 64,
     doc_id: Optional[str] = None,
+    tags: Optional[List[str]] = None,
 ):
     """Insert a single already-processed document (split into chunks) into Weaviate.
 
@@ -171,21 +167,16 @@ def insert_text_chunks(
     respect ``max_tokens``.
 
     Args:
-        collection_name: Target collection.
-        chunks_with_page: Either a sequence of (text, page_number) tuples OR a
-            sequence of plain text strings. When (text, page) tuples are
-            supplied the page is persisted in the dedicated ``page_number``
-            property. For plain strings the field is omitted. If the
-            collection somehow predates the addition of ``page_number`` the
-            function attempts (best‑effort/idempotent) to add the property
-            before inserting.
-        source: A source identifier (e.g., relative file path without ext).
+        collection_name: Target collection (must already have required schema: content, source, doc_chunk_id, tags, page_number).
+        chunks_with_page: Sequence of (text, page_number) tuples OR plain strings.
+        source: Source identifier (original filename).
         max_tokens: Max tokens per stored chunk.
         batch_size: Insert batch size.
-        doc_id: Optional stable document id; if omitted a new uuid4 is used.
+        doc_id: Optional stable document id; if omitted uuid4.
+        tags: Optional list of tag strings applied to every chunk (assumes schema already has tags).
 
     Returns:
-        dict summary with inserted chunk count and doc_id.
+        dict summary (doc_id, inserted_chunks, collection, source, has_page_numbers).
     """
     if not chunks_with_page:
         raise ValueError("chunks_with_page is empty")
@@ -222,6 +213,8 @@ def insert_text_chunks(
                     "content": sub_text,
                     "source": source,
                 }
+                if tags:
+                    obj["tags"] = tags
                 if page is not None:
                     obj["page_number"] = page
                 final_chunks.append(obj)
@@ -232,6 +225,8 @@ def insert_text_chunks(
                 "content": text,
                 "source": source,
             }
+            if tags:
+                obj["tags"] = tags
             if page is not None:
                 obj["page_number"] = page
             final_chunks.append(obj)
@@ -251,12 +246,7 @@ def insert_text_chunks(
         # Retrieve (now guaranteed to exist) from current client
         collection = client.collections.get(collection_name)
 
-        # Try to ensure page_number property exists (idempotent)
-        try:
-            collection.config.add_property(Property(name="page_number", data_type=DataType.INT))
-        except Exception:
-            # Ignore if already exists or if client version doesn't support dynamic add.
-            pass
+    # 运行时不再动态添加 schema 字段；假定集合已使用最新 schema 创建。
 
         for i in range(0, len(final_chunks), batch_size):
             batch = final_chunks[i : i + batch_size]

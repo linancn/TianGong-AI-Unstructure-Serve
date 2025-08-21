@@ -2,6 +2,8 @@ import os
 import re
 import tempfile
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from typing import List, Optional
+import json
 
 from src.models.models import InsertSummary
 from src.services.mineru_service import mineru_service
@@ -48,6 +50,7 @@ async def ingest_to_weaviate(
     collection_name: str = Form(...),
     user_id: str = Form(...),
     file: UploadFile = File(...),
+    tags: Optional[str] = Form(None, description="Optional tags as JSON array or comma-separated string"),
 ):
     """
     使用 MinerU 解析上传文档并写入 Weaviate。
@@ -68,6 +71,19 @@ async def ingest_to_weaviate(
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
 
+    # Parse optional tags input (accept JSON array or comma-separated string)
+    parsed_tags: Optional[List[str]] = None
+    if tags:
+        try:
+            if tags.strip().startswith("["):
+                loaded = json.loads(tags)
+                if isinstance(loaded, list):
+                    parsed_tags = [str(t) for t in loaded if str(t).strip()]
+            else:
+                parsed_tags = [t.strip() for t in tags.split(",") if t.strip()]
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid tags format; supply JSON array or comma-separated list")
+
     with tempfile.NamedTemporaryFile(delete=True, suffix=ext) as tmp:
         tmp.write(await file.read())
         tmp.flush()
@@ -82,6 +98,7 @@ async def ingest_to_weaviate(
                 collection_name=safe_collection,
                 chunks_with_page=chunks_with_pages,
                 source=filename,  # 使用完整文件名
+                tags=parsed_tags,
             )
             return InsertSummary(**summary)
         except HTTPException:
