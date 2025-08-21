@@ -161,7 +161,7 @@ def insert_text_chunks(
     chunks_with_page: Union[Sequence[Tuple[str, int]], Sequence[str]],
     source: str,
     max_tokens: int = 4000,
-    batch_size: int = 200,
+    batch_size: int = 64,
     doc_id: Optional[str] = None,
 ):
     """Insert a single already-processed document (split into chunks) into Weaviate.
