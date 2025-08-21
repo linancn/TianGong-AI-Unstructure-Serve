@@ -143,8 +143,6 @@ def create_collection_if_not_exists(
             collection = client.collections.get(collection_name)
             logging.debug("Collection '%s' already exists.", collection_name)
 
-    # 旧逻辑: 动态补字段已移除。现在假定集合是用最新 schema 创建的；如需修改请重建集合。
-
         return collection
     finally:
         if owned_client:
@@ -245,8 +243,6 @@ def insert_text_chunks(
             create_collection_if_not_exists(collection_name)
         # Retrieve (now guaranteed to exist) from current client
         collection = client.collections.get(collection_name)
-
-    # 运行时不再动态添加 schema 字段；假定集合已使用最新 schema 创建。
 
         for i in range(0, len(final_chunks), batch_size):
             batch = final_chunks[i : i + batch_size]

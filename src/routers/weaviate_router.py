@@ -14,6 +14,7 @@ router = APIRouter()
 # Weaviate collection/class 命名规则正则
 _WEAVIATE_CLASS_RE = re.compile(r"^[A-Z][_0-9A-Za-z]*$")
 
+
 def build_weaviate_collection_name(base: str, user_id: str) -> str:
     """
     生成合法的 Weaviate collection 名：
@@ -50,7 +51,9 @@ async def ingest_to_weaviate(
     collection_name: str = Form(...),
     user_id: str = Form(...),
     file: UploadFile = File(...),
-    tags: Optional[str] = Form(None, description="Optional tags as JSON array or comma-separated string"),
+    tags: Optional[str] = Form(
+        None, description="Optional tags as JSON array or comma-separated string"
+    ),
 ):
     """
     使用 MinerU 解析上传文档并写入 Weaviate。
@@ -63,7 +66,9 @@ async def ingest_to_weaviate(
     _, ext = os.path.splitext(filename)
     ext = ext.lower()
     if ext not in allowed_ext:
-        raise HTTPException(status_code=400, detail=f"Unsupported file type. Allowed: {', '.join(allowed_ext)}")
+        raise HTTPException(
+            status_code=400, detail=f"Unsupported file type. Allowed: {', '.join(allowed_ext)}"
+        )
 
     # 规范化并校验 collection 名称
     try:
@@ -82,7 +87,10 @@ async def ingest_to_weaviate(
             else:
                 parsed_tags = [t.strip() for t in tags.split(",") if t.strip()]
         except Exception:
-            raise HTTPException(status_code=400, detail="Invalid tags format; supply JSON array or comma-separated list")
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid tags format; supply JSON array or comma-separated list",
+            )
 
     with tempfile.NamedTemporaryFile(delete=True, suffix=ext) as tmp:
         tmp.write(await file.read())
