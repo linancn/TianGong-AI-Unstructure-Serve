@@ -1,4 +1,5 @@
 import os
+import re
 import tempfile
 import logging
 
@@ -8,15 +9,33 @@ from src.services.mineru_service_full import parse_doc
 # from src.services.vision_service_openai import vision_completion_openai
 from src.services.vision_service_genimi import vision_completion_genimi
 
+def clean_text(text):
+    """Clean text to remove surrogate characters and other problematic encodings"""
+    if not text:
+        return ""
+
+    # Remove surrogate characters
+    text = re.sub(r"[\ud800-\udfff]", "", text)
+
+    # Encode to utf-8 and decode, replacing errors
+    try:
+        text = text.encode("utf-8", errors="ignore").decode("utf-8")
+    except UnicodeError:
+        text = text.encode("ascii", errors="ignore").decode("ascii")
+
+    return text
+
+
 
 def image_text(item):
     captions = item.get("img_caption") or []
     footnotes = item.get("img_footnote") or []
-    return "\n".join([*captions, *footnotes])
+    text = "\n".join([*captions, *footnotes])
+    return clean_text(text)
 
 
 def table_text(item):
-    return "\n".join(
+    text = "\n".join(
         filter(
             None,
             [
@@ -26,6 +45,7 @@ def table_text(item):
             ],
         )
     )
+    return clean_text(text)
 
 
 def get_prev_context(context_elements, cur_idx, n=2):
@@ -78,7 +98,7 @@ def mineru_service(file_path):
                 if item.get("text", "").strip():
                     block = {
                         "type": item["type"],
-                        "text": item["text"],
+                        "text": clean_text(item["text"]),
                         "page_idx": item.get("page_idx", -1),
                         "orig_item": item,
                     }
@@ -203,6 +223,8 @@ def mineru_service(file_path):
                         img_path,
                         "\n".join(prompt_parts),
                     )
+                    # Clean the vision result text
+                    vision_result = clean_text(vision_result)
                     logging.info(
                         f"✓ Vision analysis complete for image {image_count}/{total_images}"
                     )
@@ -252,7 +274,7 @@ def mineru_service(file_path):
             elif item["type"] in ("text", "equation") and item.get("text", "").strip():
                 result_items.append(
                     TextElementWithPageNum(
-                        text=item["text"],
+                        text=clean_text(item["text"]),
                         page_number=item["page_idx"] + 1,
                     )
                 )
