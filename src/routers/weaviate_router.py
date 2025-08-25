@@ -7,6 +7,9 @@ import json
 
 from src.models.models import InsertSummary
 from src.services.mineru_service import mineru_service
+from src.services.mineru_with_images_service import (
+    mineru_service as mineru_with_images_service,
+)
 from src.services.weaviate_service import insert_text_chunks
 
 router = APIRouter()
@@ -99,6 +102,80 @@ async def ingest_to_weaviate(
 
         try:
             mineru_resp = mineru_service(tmp_path)  # ResponseWithPageNum
+            chunks_with_pages = [
+                (item.text, item.page_number) for item in mineru_resp.result if item.text.strip()
+            ]
+            summary = insert_text_chunks(
+                collection_name=safe_collection,
+                chunks_with_page=chunks_with_pages,
+                source=filename,  # 使用完整文件名
+                tags=parsed_tags,
+            )
+            return InsertSummary(**summary)
+        except HTTPException:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/weaviate/ingest-with-images",
+    response_model=InsertSummary,
+    response_description="Summary of inserted chunks parsed by MinerU-with-images.",
+)
+async def ingest_to_weaviate_with_images(
+    collection_name: str = Form(...),
+    user_id: str = Form(...),
+    file: UploadFile = File(...),
+    tags: Optional[str] = Form(
+        None, description="Optional tags as JSON array or comma-separated string"
+    ),
+):
+    """
+    使用 MinerU-with-images 解析上传文档并写入 Weaviate。
+
+    支持: .pdf
+    source 字段使用原始文件名 (含扩展名)。
+    """
+    allowed_ext = {".pdf"}
+    filename = file.filename or "uploaded"
+    _, ext = os.path.splitext(filename)
+    ext = ext.lower()
+    if ext not in allowed_ext:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type. Allowed: {', '.join(sorted(allowed_ext))}",
+        )
+
+    # 规范化并校验 collection 名称
+    try:
+        safe_collection = build_weaviate_collection_name(collection_name, user_id)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+
+    # Parse optional tags input (accept JSON array or comma-separated string)
+    parsed_tags: Optional[List[str]] = None
+    if tags:
+        try:
+            if tags.strip().startswith("["):
+                loaded = json.loads(tags)
+                if isinstance(loaded, list):
+                    parsed_tags = [str(t) for t in loaded if str(t).strip()]
+            else:
+                parsed_tags = [t.strip() for t in tags.split(",") if t.strip()]
+        except Exception:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid tags format; supply JSON array or comma-separated list",
+            )
+
+    with tempfile.NamedTemporaryFile(delete=True, suffix=ext) as tmp:
+        tmp.write(await file.read())
+        tmp.flush()
+        tmp_path = tmp.name
+
+        try:
+            mineru_resp = mineru_with_images_service(tmp_path)  # ResponseWithPageNum
             chunks_with_pages = [
                 (item.text, item.page_number) for item in mineru_resp.result if item.text.strip()
             ]
