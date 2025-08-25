@@ -78,6 +78,7 @@ npm i -g pm2
 pm2 start "env MINERU_MODEL_SOURCE=modelscope \
   TABLE_OCR=paddle \
   OCR_AGENT=unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle \
+  VISION_PROVIDER=gemini \
   uvicorn src.main:app --host 0.0.0.0 --port 7770" \
   --name unstructured-uvicorn \
   --time \
