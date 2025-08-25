@@ -9,6 +9,7 @@ from src.services.mineru_service_full import parse_doc
 # from src.services.vision_service_openai import vision_completion_openai
 from src.services.vision_service import vision_completion
 
+
 def clean_text(text):
     """Clean text to remove surrogate characters and other problematic encodings"""
     if not text:
@@ -24,7 +25,6 @@ def clean_text(text):
         text = text.encode("ascii", errors="ignore").decode("ascii")
 
     return text
-
 
 
 def image_text(item):

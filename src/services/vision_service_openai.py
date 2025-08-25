@@ -39,6 +39,5 @@ def vision_completion_openai(image_path: str, context: str = "") -> str:
                 ],
             }
         ],
-        max_tokens=300,
     )
     return response.choices[0].message.content

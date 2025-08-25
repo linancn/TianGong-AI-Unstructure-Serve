@@ -25,7 +25,9 @@ def _resolve_provider(explicit: Optional[str] = None) -> Provider:
     return "openai"  # type: ignore[return-value]
 
 
-def vision_completion(image_path: str, context: str = "", provider: Optional[Provider] = None) -> str:
+def vision_completion(
+    image_path: str, context: str = "", provider: Optional[Provider] = None
+) -> str:
     """High-level vision completion API that routes to the configured provider.
 
     Selection order:
