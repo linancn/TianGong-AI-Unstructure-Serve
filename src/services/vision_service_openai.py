@@ -21,7 +21,7 @@ def vision_completion_openai(image_path: str, context: str = "") -> str:
         prompt = f"Analyze this image with the following context:\n{context}\nDescribe the image considering this context. Only return neat facts in the language of the context."
 
     response = client.chat.completions.create(
-        model="gpt-4.1-mini",
+        model="gpt-5-mini",
         messages=[
             {
                 "role": "user",

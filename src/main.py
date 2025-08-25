@@ -1,3 +1,5 @@
+import logging
+import sys
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +21,18 @@ from src.routers import (
 )
 
 load_dotenv()
+
+# 直接配置根日志记录器
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+
+# 如果没有处理器，添加一个
+if not root_logger.handlers:
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    root_logger.addHandler(handler)
 
 bearer_scheme = HTTPBearer()
 
