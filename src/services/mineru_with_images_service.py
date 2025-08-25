@@ -7,7 +7,7 @@ from src.models.models import ResponseWithPageNum, TextElementWithPageNum
 from src.services.mineru_service_full import parse_doc
 
 # from src.services.vision_service_openai import vision_completion_openai
-from src.services.vision_service_genimi import vision_completion_genimi
+from src.services.vision_service import vision_completion
 
 def clean_text(text):
     """Clean text to remove surrogate characters and other problematic encodings"""
@@ -219,7 +219,7 @@ def mineru_service(file_path):
                 logging.info(f"Calling vision completion for image {image_count}/{total_images}...")
 
                 try:
-                    vision_result = vision_completion_genimi(
+                    vision_result = vision_completion(
                         img_path,
                         "\n".join(prompt_parts),
                     )
