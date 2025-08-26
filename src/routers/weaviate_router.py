@@ -119,7 +119,7 @@ async def ingest_to_weaviate(
 
 
 @router.post(
-    "/weaviate/ingest-with-images",
+    "/weaviate/ingest_with_images",
     response_model=InsertSummary,
     response_description="Summary of inserted chunks parsed by MinerU-with-images.",
 )
