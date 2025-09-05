@@ -76,6 +76,7 @@ nohup env MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=2 TABLE_OCR=paddle
 npm i -g pm2
 
 pm2 start "env MINERU_MODEL_SOURCE=modelscope \
+  CUDA_VISIBLE_DEVICES=0 \
   TABLE_OCR=paddle \
   OCR_AGENT=unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle \
   VISION_PROVIDER=gemini \

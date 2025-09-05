@@ -15,4 +15,4 @@ unstructured.PaddleOCR
 unstructured[all-docs]
 uvicorn[standard]
 weaviate-client
-torch<2.8
+torch
