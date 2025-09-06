@@ -10,13 +10,16 @@ router = APIRouter()
 
 @router.post(
     "/ppt",
+    summary="Extract text from PowerPoint and return page/slide-numbered chunks",
     response_model=ResponseWithPageNum,
-    response_description="List of chunks with page numbers.",
+    response_description="List of text chunks with page numbers",
 )
 async def ppt(file: UploadFile = File(...)):
     """
-    This endpoint allows you to extract text from a PDF document.
-    It takes a PDF file as input and returns a list of chunks with page numbers.
+    Extract text from PowerPoint slides and return chunks with page/slide numbers.
+
+    Input: .ppt/.pptx file
+    Output: [(text, page_number), ...]
     """
     with tempfile.NamedTemporaryFile(delete=True) as tmp:
         tmp.write(await file.read())

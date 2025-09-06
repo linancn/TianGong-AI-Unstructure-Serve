@@ -48,8 +48,9 @@ def build_weaviate_collection_name(base: str, user_id: str) -> str:
 
 @router.post(
     "/weaviate/ingest",
+    summary="Ingest parsed chunks into Weaviate (PDF via MinerU, DOCX via DOCX parser)",
     response_model=InsertSummary,
-    response_description="Summary of inserted chunks parsed by MinerU.",
+    response_description="Summary of inserted chunks",
 )
 async def ingest_to_weaviate(
     collection_name: str = Form(...),
@@ -60,18 +61,21 @@ async def ingest_to_weaviate(
     ),
 ):
     """
-    使用 MinerU 解析上传文档并写入 Weaviate。
+    Parse the uploaded document and insert chunks into Weaviate.
 
-    支持: .pdf
-    source 字段使用原始文件名 (含扩展名)。
+    - Supported types: .pdf (MinerU), .docx (DOCX parser service)
+    - Collection name: sanitize and combine collection_name and user_id to a legal Weaviate class name
+    - tags: JSON array or comma-separated string
+    - source: original filename (with extension)
+    - Returns: number of inserted items and summary
     """
-    allowed_ext = {".pdf"}
+    allowed_ext = {".pdf", ".docx"}
     filename = file.filename or "uploaded"
     _, ext = os.path.splitext(filename)
     ext = ext.lower()
     if ext not in allowed_ext:
         raise HTTPException(
-            status_code=400, detail=f"Unsupported file type. Allowed: {', '.join(allowed_ext)}"
+            status_code=400, detail=f"Unsupported file type. Allowed: {', '.join(sorted(allowed_ext))}"
         )
 
     # 规范化并校验 collection 名称
@@ -102,16 +106,29 @@ async def ingest_to_weaviate(
         tmp_path = tmp.name
 
         try:
-            mineru_resp = mineru_service(tmp_path)  # ResponseWithPageNum
-            chunks_with_pages = [
-                (item.text, item.page_number) for item in mineru_resp.result if item.text.strip()
-            ]
-            summary = insert_text_chunks(
-                collection_name=safe_collection,
-                chunks_with_page=chunks_with_pages,
-                source=filename,  # 使用完整文件名
-                tags=parsed_tags,
-            )
+            if ext == ".pdf":
+                # PDF：使用 MinerU，得到 (text, page) 列表
+                mineru_resp = mineru_service(tmp_path)  # ResponseWithPageNum
+                chunks_with_pages = [
+                    (item.text, item.page_number)
+                    for item in mineru_resp.result
+                    if item.text.strip()
+                ]
+                summary = insert_text_chunks(
+                    collection_name=safe_collection,
+                    chunks_with_page=chunks_with_pages,
+                    source=filename,
+                    tags=parsed_tags,
+                )
+            else:
+                # DOCX：使用 DOCX 解析服务，得到不带页码的文本列表
+                chunks: List[str] = unstructure_docx(tmp_path)
+                summary = insert_text_chunks(
+                    collection_name=safe_collection,
+                    chunks_with_page=chunks,
+                    source=filename,
+                    tags=parsed_tags,
+                )
             return InsertSummary(**summary)
         except HTTPException:
             raise
@@ -121,8 +138,9 @@ async def ingest_to_weaviate(
 
 @router.post(
     "/weaviate/ingest_with_images",
+    summary="Ingest parsed chunks into Weaviate (MinerU with images)",
     response_model=InsertSummary,
-    response_description="Summary of inserted chunks parsed by MinerU-with-images.",
+    response_description="Summary of inserted chunks",
 )
 async def ingest_to_weaviate_with_images(
     collection_name: str = Form(...),
@@ -133,10 +151,14 @@ async def ingest_to_weaviate_with_images(
     ),
 ):
     """
-    使用 MinerU-with-images 解析上传文档并写入 Weaviate。
+    Use MinerU-with-images to parse an uploaded PDF and insert chunks into Weaviate
+    with image-aware extraction (figures/tables).
 
-    支持: .pdf
-    source 字段使用原始文件名 (含扩展名)。
+    - Supported types: .pdf
+    - Collection name: sanitize and combine collection_name and user_id to a legal Weaviate class name
+    - tags: JSON array or comma-separated string
+    - source: original filename (with extension)
+    - Returns: number of inserted items and summary
     """
     allowed_ext = {".pdf"}
     filename = file.filename or "uploaded"
@@ -193,74 +215,4 @@ async def ingest_to_weaviate_with_images(
             raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post(
-    "/weaviate/ingest_docx",
-    response_model=InsertSummary,
-    response_description="Summary of inserted chunks parsed from DOCX.",
-)
-async def ingest_docx_to_weaviate(
-    collection_name: str = Form(...),
-    user_id: str = Form(...),
-    file: UploadFile = File(...),
-    tags: Optional[str] = Form(
-        None, description="Optional tags as JSON array or comma-separated string"
-    ),
-):
-    """
-    使用 DOCX 解析服务解析上传的 .docx 文档并写入 Weaviate。
-
-    支持: .docx
-    source 字段使用原始文件名 (含扩展名)。
-    """
-    allowed_ext = {".docx"}
-    filename = file.filename or "uploaded"
-    _, ext = os.path.splitext(filename)
-    ext = ext.lower()
-    if ext not in allowed_ext:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported file type. Allowed: {', '.join(sorted(allowed_ext))}",
-        )
-
-    # 规范化并校验 collection 名称
-    try:
-        safe_collection = build_weaviate_collection_name(collection_name, user_id)
-    except ValueError as ve:
-        raise HTTPException(status_code=400, detail=str(ve))
-
-    # Parse optional tags input (accept JSON array or comma-separated string)
-    parsed_tags: Optional[List[str]] = None
-    if tags:
-        try:
-            if tags.strip().startswith("["):
-                loaded = json.loads(tags)
-                if isinstance(loaded, list):
-                    parsed_tags = [str(t) for t in loaded if str(t).strip()]
-            else:
-                parsed_tags = [t.strip() for t in tags.split(",") if t.strip()]
-        except Exception:
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid tags format; supply JSON array or comma-separated list",
-            )
-
-    with tempfile.NamedTemporaryFile(delete=True, suffix=ext) as tmp:
-        tmp.write(await file.read())
-        tmp.flush()
-        tmp_path = tmp.name
-
-        try:
-            # DOCX 解析返回不带页码的文本列表
-            chunks: List[str] = unstructure_docx(tmp_path)
-            # 插入到 Weaviate（无页码分支）
-            summary = insert_text_chunks(
-                collection_name=safe_collection,
-                chunks_with_page=chunks,
-                source=filename,
-                tags=parsed_tags,
-            )
-            return InsertSummary(**summary)
-        except HTTPException:
-            raise
-        except Exception as e:  # noqa: BLE001
-            raise HTTPException(status_code=500, detail=str(e))
+# 已移除 /weaviate/ingest_docx 入口，统一由 /weaviate/ingest 处理 .pdf 与 .docx

@@ -14,13 +14,16 @@ ALLOWED_EXTENSIONS = [".pdf", ".png", ".jpeg", ".jpg"]
 
 @router.post(
     "/mineru_with_images",
+    summary="Parse with MinerU (image-aware) and return page-numbered chunks",
     response_model=ResponseWithPageNum,
-    response_description="List of chunks with page numbers.",
+    response_description="List of text chunks with page numbers",
 )
 async def mineru_with_images(file: UploadFile = File(...)):
     """
-    This endpoint allows you to extract text from a document with images by MinerU.
-    Only PDF, PNG, JPEG, and JPG files are accepted.
+    Use MinerU with image-aware extraction (figures/tables) and return text chunks with page numbers.
+
+    Accepted: .pdf, .png, .jpeg, .jpg
+    Output: [(text, page_number), ...]
     """
     # Get file extension
     _, file_ext = os.path.splitext(file.filename)

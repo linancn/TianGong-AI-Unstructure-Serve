@@ -10,13 +10,16 @@ router = APIRouter()
 
 @router.post(
     "/docx",
+    summary="Extract plain text chunks from DOCX (no page numbers)",
     response_model=ResponseWithoutPageNum,
-    response_description="List of chunks.",
+    response_description="List of text chunks (no page numbers)",
 )
 async def docx(file: UploadFile = File(...)):
     """
-    This endpoint allows you to extract text from a PDF document.
-    It takes a PDF file as input and returns a list of chunks with page numbers.
+    Extract plain-text chunks from an uploaded .docx file.
+
+    Input: .docx file
+    Output: list of text chunks (no page numbers)
     """
     with tempfile.NamedTemporaryFile(delete=True) as tmp:
         tmp.write(await file.read())

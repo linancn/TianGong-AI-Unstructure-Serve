@@ -10,12 +10,15 @@ router = APIRouter()
 
 @router.post(
     "/omniai",
+    summary="Parse document with OmniAI and return page-numbered chunks",
     response_model=ResponseWithPageNum,
-    response_description="List of chunks with page numbers.",
+    response_description="List of text chunks with page numbers",
 )
 async def omniai(file: UploadFile = File(...)):
     """
-    This endpoint allows you to extract text from a document by OmniAI.
+    Parse an uploaded document using OmniAI and return text chunks with page numbers.
+    Input: document types supported by the service (e.g., PDF/PPT)
+    Output: [(text, page_number), ...]
     """
     with tempfile.NamedTemporaryFile(delete=True) as tmp:
         tmp.write(await file.read())

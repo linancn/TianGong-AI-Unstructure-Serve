@@ -13,13 +13,17 @@ ALLOWED_EXTENSIONS = [".pdf", ".png", ".jpeg", ".jpg"]
 
 @router.post(
     "/mineru_sci",
+    summary="Parse scientific/academic docs with MinerU (sci), return page-numbered chunks",
     response_model=ResponseWithPageNum,
-    response_description="List of chunks with page numbers.",
+    response_description="List of text chunks with page numbers",
 )
 async def mineru(file: UploadFile = File(...)):
     """
-    This endpoint allows you to extract text from a sci document by MinerU.
-    Only PDF, PNG, JPEG, and JPG files are accepted.
+    Use MinerU (sci pipeline) to parse scientific/academic documents and return
+    text chunks with page numbers.
+
+    Accepted: .pdf, .png, .jpeg, .jpg
+    Output: [(text, page_number), ...]
     """
     # Get file extension
     _, file_ext = os.path.splitext(file.filename)
