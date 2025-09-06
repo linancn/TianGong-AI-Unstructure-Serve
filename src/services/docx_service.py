@@ -52,8 +52,8 @@ def unstructure_docx(file_name):
 
     if title_buffer:
         if merged_list:
-            last_text, _ = merged_list[-1]
-            merged_list[-1] = last_text + "\n" + "\n".join(title_buffer)
+            # Append any remaining title lines to the last merged text block
+            merged_list[-1] = merged_list[-1] + "\n" + "\n".join(title_buffer)
         else:
             merged_list.append("\n".join(title_buffer))
 
