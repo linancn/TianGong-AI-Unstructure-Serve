@@ -25,6 +25,11 @@ pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
 pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 pip install -r requirements.txt --upgrade
 
+pip install -r requirements_freeze.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+pip install torch==2.8 torchvision torchaudio -i https://pypi.tuna.tsinghua.edu.cn/simple
+  
+
 wget https://gcore.jsdelivr.net/gh/opendatalab/MinerU@master/scripts/download_models_hf.py -O download_models_hf.py
 python download_models_hf.py
 
@@ -76,7 +81,7 @@ nohup env MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=2 TABLE_OCR=paddle
 npm i -g pm2
 
 pm2 start "env MINERU_MODEL_SOURCE=modelscope \
-  CUDA_VISIBLE_DEVICES=1 \
+  CUDA_VISIBLE_DEVICES=2 \
   TABLE_OCR=paddle \
   OCR_AGENT=unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle \
   VISION_PROVIDER=gemini \
