@@ -80,22 +80,16 @@ nohup env MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=2 TABLE_OCR=paddle
 
 npm i -g pm2
 
-pm2 start "env MINERU_MODEL_SOURCE=modelscope \
-  CUDA_VISIBLE_DEVICES=2 \
-  TABLE_OCR=paddle \
-  OCR_AGENT=unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle \
-  VISION_PROVIDER=gemini \
-  uvicorn src.main:app --host 0.0.0.0 --port 7770" \
-  --name unstructured-uvicorn \
-  --time \
-  --output uvicorn.log \
-  --error uvicorn.log
+pm2 start ecosystem.config.js
+
+pm2 start ecosystem.config.single.js
 
 pm2 status
 
-pm2 restart unstructured-uvicorn
-pm2 stop unstructured-uvicorn
-pm2 delete unstructured-uvicorn
+pm2 restart unstructured-uvicorn-0
+pm2 stop unstructured-uvicorn-0
+pm2 delete unstructured-uvicorn-0
 
-pm2 logs unstructured-uvicorn
+pm2 logs unstructured-uvicorn-0
+
 ```
