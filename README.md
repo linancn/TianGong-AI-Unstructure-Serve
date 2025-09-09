@@ -80,9 +80,9 @@ nohup env MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=2 TABLE_OCR=paddle
 
 npm i -g pm2
 
-pm2 start ecosystem.config.js
+pm2 start ecosystem.triple.json
 
-pm2 start ecosystem.config.single.js
+pm2 start ecosystem.quatro.json
 
 pm2 status
 
