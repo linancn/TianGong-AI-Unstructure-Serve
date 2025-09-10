@@ -1,18 +1,18 @@
 services:
   weaviate:
     command:
-    - --host
-    - 0.0.0.0
-    - --port
-    - '8080'
-    - --scheme
-    - http
+      - --host
+      - 0.0.0.0
+      - --port
+      - '8080'
+      - --scheme
+      - http
     image: cr.weaviate.io/semitechnologies/weaviate:1.32.3
     ports:
-    - 8080:8080
-    - 50051:50051
+      - "8080:8080"
+      - "50051:50051"
     volumes:
-    - ./weaviate_data:/var/lib/weaviate
+      - ./weaviate_data:/var/lib/weaviate
     restart: unless-stopped
     depends_on:
       - t2v-transformers
@@ -28,8 +28,9 @@ services:
       ENABLE_MODULES: 'text2vec-transformers'
       ENABLE_TOKENIZER_GSE: 'true'
       CLUSTER_HOSTNAME: 'node1'
+
   t2v-transformers:
     image: cr.weaviate.io/semitechnologies/transformers-inference:baai-bge-m3-onnx
-  restart: unless-stopped
-  environment:
+    restart: unless-stopped
+    environment:
       ENABLE_CUDA: '0'
