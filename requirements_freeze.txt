@@ -17,6 +17,7 @@ attrs==25.3.0
 Authlib==1.6.3
 backoff==2.2.1
 beautifulsoup4==4.13.5
+black==25.1.0
 blobfile==3.0.0
 boto3==1.40.25
 botocore==1.40.25
@@ -166,6 +167,7 @@ paddlepaddle-gpu==2.6.2
 pandas==2.3.2
 parso==0.8.5
 partial-json-parser==0.2.1.1.post6
+pathspec==0.12.1
 pdf2image==1.17.0
 pdfminer.six==20250506
 pdftext==0.6.3
@@ -173,6 +175,7 @@ pexpect==4.9.0
 pi_heif==1.1.0
 pikepdf==9.10.2
 pillow==11.3.0
+platformdirs==4.4.0
 polars==1.33.0
 prometheus_client==0.22.1
 prompt_toolkit==3.0.52

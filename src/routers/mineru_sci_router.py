@@ -2,8 +2,8 @@ import tempfile
 import os
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from src.models.models import ResponseWithPageNum
-from src.services.mineru_sci_service import mineru_service
+from src.models.models import ResponseWithPageNum, TextElementWithPageNum
+from src.services.gpu_scheduler import scheduler
 
 router = APIRouter()
 
@@ -36,12 +36,39 @@ async def mineru(file: UploadFile = File(...)):
             detail=f"Unsupported file type. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}",
         )
 
-    with tempfile.NamedTemporaryFile(suffix=file_ext, delete=True) as tmp:
+    # Use a persistent temp file so it survives queueing; we'll clean it up after processing
+    tmp = tempfile.NamedTemporaryFile(suffix=file_ext, delete=False)
+    try:
         tmp.write(await file.read())
+        tmp.flush()
         tmp_path = tmp.name
+    finally:
+        tmp.close()
 
+    try:
+        # Dispatch to GPU scheduler; this returns a Future
+        fut = scheduler.submit(tmp_path, pipeline="sci")
+        payload = await _await_future(fut)
+        # Map back into Pydantic model
+        items = [
+            TextElementWithPageNum(text=it["text"], page_number=int(it["page_number"]))
+            for it in payload.get("result", [])
+        ]
+        # The sci service has its own filtering logic, which is now inside the worker.
+        # We just need to reconstruct the response.
+        return ResponseWithPageNum(result=items)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
         try:
-            result = mineru_service(tmp_path)
-            return result
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+
+# Small helper to await a concurrent.futures.Future inside async route
+async def _await_future(fut):
+    import asyncio
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, fut.result)

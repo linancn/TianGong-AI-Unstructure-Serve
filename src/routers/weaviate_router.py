@@ -5,11 +5,8 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from typing import List, Optional
 import json
 
-from src.models.models import InsertSummary
-from src.services.mineru_service import mineru_service
-from src.services.mineru_with_images_service import (
-    mineru_service as mineru_with_images_service,
-)
+from src.models.models import InsertSummary, ResponseWithPageNum, TextElementWithPageNum
+from src.services.gpu_scheduler import scheduler
 from src.services.weaviate_service import insert_text_chunks
 from src.services.docx_service import unstructure_docx
 
@@ -46,6 +43,14 @@ def build_weaviate_collection_name(base: str, user_id: str) -> str:
     return name
 
 
+# Small helper to await a concurrent.futures.Future inside async route
+async def _await_future(fut):
+    import asyncio
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, fut.result)
+
+
 @router.post(
     "/weaviate/ingest",
     summary="Ingest parsed chunks into Weaviate (PDF via MinerU, DOCX via DOCX parser)",
@@ -75,7 +80,8 @@ async def ingest_to_weaviate(
     ext = ext.lower()
     if ext not in allowed_ext:
         raise HTTPException(
-            status_code=400, detail=f"Unsupported file type. Allowed: {', '.join(sorted(allowed_ext))}"
+            status_code=400,
+            detail=f"Unsupported file type. Allowed: {', '.join(sorted(allowed_ext))}",
         )
 
     # 规范化并校验 collection 名称
@@ -100,40 +106,53 @@ async def ingest_to_weaviate(
                 detail="Invalid tags format; supply JSON array or comma-separated list",
             )
 
-    with tempfile.NamedTemporaryFile(delete=True, suffix=ext) as tmp:
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+    try:
         tmp.write(await file.read())
         tmp.flush()
         tmp_path = tmp.name
+    finally:
+        tmp.close()
 
+    try:
+        if ext == ".pdf":
+            # PDF：使用 MinerU，得到 (text, page) 列表
+            fut = scheduler.submit(tmp_path, pipeline="default")
+            payload = await _await_future(fut)
+            items = [
+                TextElementWithPageNum(text=it["text"], page_number=int(it["page_number"]))
+                for it in payload.get("result", [])
+            ]
+            mineru_resp = ResponseWithPageNum(result=items)
+
+            chunks_with_pages = [
+                (item.text, item.page_number) for item in mineru_resp.result if item.text.strip()
+            ]
+            summary = insert_text_chunks(
+                collection_name=safe_collection,
+                chunks_with_page=chunks_with_pages,
+                source=filename,
+                tags=parsed_tags,
+            )
+        else:
+            # DOCX：使用 DOCX 解析服务，得到不带页码的文本列表
+            chunks: List[str] = unstructure_docx(tmp_path)
+            summary = insert_text_chunks(
+                collection_name=safe_collection,
+                chunks_with_page=chunks,
+                source=filename,
+                tags=parsed_tags,
+            )
+        return InsertSummary(**summary)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
         try:
-            if ext == ".pdf":
-                # PDF：使用 MinerU，得到 (text, page) 列表
-                mineru_resp = mineru_service(tmp_path)  # ResponseWithPageNum
-                chunks_with_pages = [
-                    (item.text, item.page_number)
-                    for item in mineru_resp.result
-                    if item.text.strip()
-                ]
-                summary = insert_text_chunks(
-                    collection_name=safe_collection,
-                    chunks_with_page=chunks_with_pages,
-                    source=filename,
-                    tags=parsed_tags,
-                )
-            else:
-                # DOCX：使用 DOCX 解析服务，得到不带页码的文本列表
-                chunks: List[str] = unstructure_docx(tmp_path)
-                summary = insert_text_chunks(
-                    collection_name=safe_collection,
-                    chunks_with_page=chunks,
-                    source=filename,
-                    tags=parsed_tags,
-                )
-            return InsertSummary(**summary)
-        except HTTPException:
-            raise
-        except Exception as e:  # noqa: BLE001
-            raise HTTPException(status_code=500, detail=str(e))
+            os.unlink(tmp_path)
+        except Exception:
+            pass
 
 
 @router.post(
@@ -192,27 +211,42 @@ async def ingest_to_weaviate_with_images(
                 detail="Invalid tags format; supply JSON array or comma-separated list",
             )
 
-    with tempfile.NamedTemporaryFile(delete=True, suffix=ext) as tmp:
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+    try:
         tmp.write(await file.read())
         tmp.flush()
         tmp_path = tmp.name
+    finally:
+        tmp.close()
 
+    try:
+        fut = scheduler.submit(tmp_path, pipeline="images")
+        payload = await _await_future(fut)
+        items = [
+            TextElementWithPageNum(text=it["text"], page_number=int(it["page_number"]))
+            for it in payload.get("result", [])
+        ]
+        mineru_resp = ResponseWithPageNum(result=items)
+
+        chunks_with_pages = [
+            (item.text, item.page_number) for item in mineru_resp.result if item.text.strip()
+        ]
+        summary = insert_text_chunks(
+            collection_name=safe_collection,
+            chunks_with_page=chunks_with_pages,
+            source=filename,  # 使用完整文件名
+            tags=parsed_tags,
+        )
+        return InsertSummary(**summary)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
         try:
-            mineru_resp = mineru_with_images_service(tmp_path)  # ResponseWithPageNum
-            chunks_with_pages = [
-                (item.text, item.page_number) for item in mineru_resp.result if item.text.strip()
-            ]
-            summary = insert_text_chunks(
-                collection_name=safe_collection,
-                chunks_with_page=chunks_with_pages,
-                source=filename,  # 使用完整文件名
-                tags=parsed_tags,
-            )
-            return InsertSummary(**summary)
-        except HTTPException:
-            raise
-        except Exception as e:  # noqa: BLE001
-            raise HTTPException(status_code=500, detail=str(e))
+            os.unlink(tmp_path)
+        except Exception:
+            pass
 
 
 # 已移除 /weaviate/ingest_docx 入口，统一由 /weaviate/ingest 处理 .pdf 与 .docx

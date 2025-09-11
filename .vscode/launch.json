@@ -12,13 +12,20 @@
             "args": [
                 "src.main:app",
                 "--reload",
+                "--reload-dir",
+                "src",
+                "--reload-exclude",
+                "weaviate/**",
+                "--host",
+                "0.0.0.0",
                 "--port",
                 "8770"
             ],
             "jinja": true,
             "justMyCode": true,
             "env": {
-                "PYDEVD_DISABLE_FILE_VALIDATION": "1"
+                "PYDEVD_DISABLE_FILE_VALIDATION": "1",
+                "GPU_IDS": "0,1,2"
             }
         }
     ]
