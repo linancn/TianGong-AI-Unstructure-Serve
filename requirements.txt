@@ -1,5 +1,6 @@
 fastapi
 google-genai
+gunicorn
 mineru[all]
 openai
 paddlepaddle-gpu

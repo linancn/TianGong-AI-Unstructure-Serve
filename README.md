@@ -82,13 +82,15 @@ npm i -g pm2
 
 pm2 start ecosystem.config.json
 
+pm2 start ecosystem.quatro.json
+
 pm2 restart all
 
 pm2 status
 
-pm2 restart unstructured-uvicorn
-pm2 stop unstructured-uvicorn
-pm2 delete unstructured-uvicorn
+pm2 restart unstructured-gunicorn
+pm2 stop unstructured-gunicorn
+pm2 delete unstructured-gunicorn
 
-pm2 logs unstructured-uvicorn
+pm2 logs unstructured-gunicorn
 ```
