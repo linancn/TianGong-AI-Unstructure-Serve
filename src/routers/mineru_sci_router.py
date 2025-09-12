@@ -1,5 +1,6 @@
 import tempfile
 import os
+import asyncio
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from src.models.models import ResponseWithPageNum, TextElementWithPageNum
@@ -9,6 +10,7 @@ router = APIRouter()
 
 # List of allowed file extensions
 ALLOWED_EXTENSIONS = [".pdf", ".png", ".jpeg", ".jpg"]
+PARSE_TIMEOUT = int(os.getenv("MINERU_SCI_TIMEOUT_SECONDS", "110"))
 
 
 @router.post(
@@ -48,7 +50,14 @@ async def mineru(file: UploadFile = File(...)):
     try:
         # Dispatch to GPU scheduler; this returns a Future
         fut = scheduler.submit(tmp_path, pipeline="sci")
-        payload = await _await_future(fut)
+        try:
+            payload = await asyncio.wait_for(_await_future(fut), timeout=PARSE_TIMEOUT)
+        except asyncio.TimeoutError:
+            # Best-effort cancel; real hard timeout enforced inside worker wrapper
+            fut.cancel()
+            raise HTTPException(
+                status_code=504, detail=f"Parsing timeout after {PARSE_TIMEOUT}s (sci pipeline)"
+            )
         # Map back into Pydantic model
         items = [
             TextElementWithPageNum(text=it["text"], page_number=int(it["page_number"]))
@@ -57,6 +66,8 @@ async def mineru(file: UploadFile = File(...)):
         # The sci service has its own filtering logic, which is now inside the worker.
         # We just need to reconstruct the response.
         return ResponseWithPageNum(result=items)
+    except TimeoutError as e:  # from hard timeout in worker layer
+        raise HTTPException(status_code=504, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:

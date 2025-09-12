@@ -1,6 +1,8 @@
 import os
 import re
 import tempfile
+import multiprocessing
+import queue
 from concurrent.futures import ProcessPoolExecutor, Future
 from dataclasses import dataclass
 from threading import Lock
@@ -42,12 +44,8 @@ def _table_text(item: dict) -> str:
     return _clean_text(combined_text)
 
 
-def _worker_process_file(file_path: str, pipeline: str) -> Dict[str, List[Dict[str, int]]]:
-    """Run MinerU parsing in the worker process and return a plain-JSON result.
-
-    Returns a dict: {"result": [{"text": str, "page_number": int}, ...]}
-    """
-    # Import heavy libs after GPU is pinned in the initializer
+def _actual_parse(file_path: str, pipeline: str) -> List[Dict[str, int]]:
+    """Inner heavy parse logic (run inside an isolated subprocess watchdog)."""
     if pipeline == "sci":
         from src.services.mineru_sci_service import parse_doc
     elif pipeline == "images":
@@ -58,7 +56,6 @@ def _worker_process_file(file_path: str, pipeline: str) -> Dict[str, List[Dict[s
     with tempfile.TemporaryDirectory() as tmp_dir:
         content_list_content, _ = parse_doc([file_path], tmp_dir)
         results: List[Dict[str, int]] = []
-
         for item in content_list_content:
             itype = item.get("type")
             if itype in ("text", "equation") and (item.get("text", "").strip()):
@@ -71,15 +68,64 @@ def _worker_process_file(file_path: str, pipeline: str) -> Dict[str, List[Dict[s
                 text = _table_text(item)
             else:
                 continue
-
             results.append(
                 {
                     "text": text,
                     "page_number": int(item.get("page_idx", 0)) + 1,
                 }
             )
+        return results
 
-        return {"result": results}
+
+def _worker_process_file(file_path: str, pipeline: str) -> Dict[str, List[Dict[str, int]]]:
+    """Run MinerU parsing with a per-task hard timeout using an isolated child process.
+
+    This prevents a single stuck PDF from blocking the GPU worker forever.
+    Env variables (seconds):
+      MINERU_TASK_HARD_TIMEOUT_SECONDS (global fallback, default 600)
+      MINERU_SCI_HARD_TIMEOUT_SECONDS (pipeline == 'sci')
+      MINERU_IMAGES_HARD_TIMEOUT_SECONDS (pipeline == 'images')
+      MINERU_DEFAULT_HARD_TIMEOUT_SECONDS (pipeline == 'default')
+    """
+    # Resolve hard timeout
+    global_default = int(os.getenv("MINERU_TASK_HARD_TIMEOUT_SECONDS", "600"))
+    if pipeline == "sci":
+        hard_timeout = int(os.getenv("MINERU_SCI_HARD_TIMEOUT_SECONDS", str(global_default)))
+    elif pipeline == "images":
+        hard_timeout = int(os.getenv("MINERU_IMAGES_HARD_TIMEOUT_SECONDS", str(global_default)))
+    else:
+        hard_timeout = int(os.getenv("MINERU_DEFAULT_HARD_TIMEOUT_SECONDS", str(global_default)))
+
+    result_queue: multiprocessing.Queue = multiprocessing.Queue(maxsize=1)
+
+    def _child(q: multiprocessing.Queue, path: str, pipe: str):  # pragma: no cover - simple wrapper
+        try:
+            data = _actual_parse(path, pipe)
+            q.put({"ok": True, "data": data})
+        except Exception as e:  # noqa
+            q.put({"ok": False, "error": str(e)})
+
+    proc = multiprocessing.Process(
+        target=_child, args=(result_queue, file_path, pipeline), daemon=True
+    )
+    proc.start()
+
+    try:
+        try:
+            msg = result_queue.get(timeout=hard_timeout)
+        except queue.Empty:
+            # Timeout -> kill child
+            if proc.is_alive():
+                proc.terminate()
+                proc.join(timeout=5)
+            raise TimeoutError(f"Parse hard timeout after {hard_timeout}s (pipeline={pipeline})")
+
+        if not msg.get("ok"):
+            raise RuntimeError(msg.get("error", "Unknown parse error"))
+        return {"result": msg["data"]}
+    finally:
+        if proc.is_alive():  # ensure cleanup
+            proc.join(timeout=1)
 
 
 @dataclass

@@ -11,7 +11,9 @@
         "MINERU_MODEL_SOURCE": "modelscope",
         "TABLE_OCR": "paddle",
         "OCR_AGENT": "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle",
-        "VISION_PROVIDER": "gemini"
+        "VISION_PROVIDER": "gemini",
+        "MINERU_SCI_TIMEOUT_SECONDS": "110",
+        "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300"
       },
       "out_file": "gunicorn-0.log",
       "error_file": "gunicorn-0.log",
@@ -28,7 +30,9 @@
         "MINERU_MODEL_SOURCE": "modelscope",
         "TABLE_OCR": "paddle",
         "OCR_AGENT": "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle",
-        "VISION_PROVIDER": "gemini"
+        "VISION_PROVIDER": "gemini",
+        "MINERU_SCI_TIMEOUT_SECONDS": "110",
+        "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300"
       },
       "out_file": "gunicorn-1.log",
       "error_file": "gunicorn-1.log",
@@ -45,7 +49,9 @@
         "MINERU_MODEL_SOURCE": "modelscope",
         "TABLE_OCR": "paddle",
         "OCR_AGENT": "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle",
-        "VISION_PROVIDER": "gemini"
+        "VISION_PROVIDER": "gemini",
+        "MINERU_SCI_TIMEOUT_SECONDS": "110",
+        "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300"
       },
       "out_file": "gunicorn-2.log",
       "error_file": "gunicorn-2.log",
@@ -62,7 +68,9 @@
         "MINERU_MODEL_SOURCE": "modelscope",
         "TABLE_OCR": "paddle",
         "OCR_AGENT": "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle",
-        "VISION_PROVIDER": "gemini"
+        "VISION_PROVIDER": "gemini",
+        "MINERU_SCI_TIMEOUT_SECONDS": "110",
+        "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300"
       },
       "out_file": "gunicorn-3.log",
       "error_file": "gunicorn-3.log",
