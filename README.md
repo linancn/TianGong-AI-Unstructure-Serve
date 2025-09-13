@@ -93,4 +93,21 @@ pm2 stop unstructured-gunicorn
 pm2 delete unstructured-gunicorn
 
 pm2 logs unstructured-gunicorn
+
+pm2 delete all
+
+# 使用 for 循环和 lsof
+for port in {8770..8773}
+do
+  # lsof -t 选项只会输出PID，方便后续处理
+  PID=$(sudo lsof -t -i:$port)
+  
+  if [ -n "$PID" ]; then
+    echo "找到占用端口 $port 的进程，PID: $PID。正在终止..."
+    sudo kill -9 $PID
+  else
+    echo "端口 $port 未被占用。"
+  fi
+done
+
 ```
