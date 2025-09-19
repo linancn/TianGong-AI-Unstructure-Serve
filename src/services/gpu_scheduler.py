@@ -77,6 +77,15 @@ def _actual_parse(file_path: str, pipeline: str) -> List[Dict[str, int]]:
         return results
 
 
+def _child_worker(q: multiprocessing.Queue, path: str, pipeline: str) -> None:
+    """Wrapper run in a separate process to enforce a hard timeout."""  # pragma: no cover
+    try:
+        data = _actual_parse(path, pipeline)
+        q.put({"ok": True, "data": data})
+    except Exception as exc:  # noqa: broad-except - propagate failure info through queue
+        q.put({"ok": False, "error": str(exc)})
+
+
 def _worker_process_file(file_path: str, pipeline: str) -> Dict[str, List[Dict[str, int]]]:
     """Run MinerU parsing with a per-task hard timeout using an isolated child process.
 
@@ -98,15 +107,8 @@ def _worker_process_file(file_path: str, pipeline: str) -> Dict[str, List[Dict[s
 
     result_queue: multiprocessing.Queue = multiprocessing.Queue(maxsize=1)
 
-    def _child(q: multiprocessing.Queue, path: str, pipe: str):  # pragma: no cover - simple wrapper
-        try:
-            data = _actual_parse(path, pipe)
-            q.put({"ok": True, "data": data})
-        except Exception as e:  # noqa
-            q.put({"ok": False, "error": str(e)})
-
     proc = multiprocessing.Process(
-        target=_child, args=(result_queue, file_path, pipeline), daemon=True
+        target=_child_worker, args=(result_queue, file_path, pipeline), daemon=True
     )
     proc.start()
 
