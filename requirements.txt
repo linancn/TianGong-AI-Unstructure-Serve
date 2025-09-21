@@ -3,17 +3,14 @@ google-genai
 gunicorn
 mineru[all]
 openai
-paddlepaddle-gpu
-# paddlepaddle
 pdf2image
 pillow
-python-dotenv
 py-zerox
+python-dotenv
 tenacity
 tiktoken
 toml
-unstructured.PaddleOCR
-unstructured[all-docs]
+torch
+unstructured[docx]
 uvicorn[standard]
 weaviate-client
-torch
