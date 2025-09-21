@@ -11,6 +11,6 @@ tenacity
 tiktoken
 toml
 torch
-unstructured[docx]
+unstructured[docx,pptx]
 uvicorn[standard]
 weaviate-client
