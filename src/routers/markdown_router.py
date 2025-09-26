@@ -17,9 +17,8 @@ class MarkdownPayload(BaseModel):
     """Request body for Markdown export."""
 
     content: str = Field(..., description="Markdown document content")
-    filename: str | None = Field(
-        default=None,
-        description="Optional filename for download; .md will be appended automatically",
+    filename: str = Field(
+        ..., description="Filename for download; .md will be appended automatically"
     )
 
 
