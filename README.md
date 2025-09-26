@@ -110,4 +110,16 @@ do
   fi
 done
 
+# 使用 lsof 清理 7770 端口
+port=7770
+# lsof -t 选项只会输出PID，方便后续处理
+PID=$(sudo lsof -t -i:$port)
+
+if [ -n "$PID" ]; then
+  echo "找到占用端口 $port 的进程，PID: $PID。正在终止..."
+  sudo kill -9 $PID
+else
+  echo "端口 $port 未被占用。"
+fi
+
 ```
