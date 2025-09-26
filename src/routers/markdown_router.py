@@ -4,22 +4,12 @@ from __future__ import annotations
 
 import io
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Form, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
 
 from src.services.markdown_service import markdown_bytes
 
 router = APIRouter()
-
-
-class MarkdownPayload(BaseModel):
-    """Request body for Markdown export."""
-
-    content: str = Field(..., description="Markdown document content")
-    filename: str = Field(
-        ..., description="Filename for download; .md will be appended automatically"
-    )
 
 
 @router.post(
@@ -27,11 +17,16 @@ class MarkdownPayload(BaseModel):
     summary="Create a Markdown file from supplied text",
     response_description="Markdown file download",
 )
-async def export_markdown_file(payload: MarkdownPayload):
+async def export_markdown_file(
+    content: str = Form(..., description="Markdown document content"),
+    filename: str = Form(
+        ..., description="Filename for download; .md will be appended automatically"
+    ),
+):
     """Return a Markdown file generated from the provided content string."""
 
     try:
-        filename, data = markdown_bytes(payload.content, payload.filename)
+        filename, data = markdown_bytes(content, filename)
     except ValueError as exc:  # Defensive: service returns ValueError on invalid input
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
