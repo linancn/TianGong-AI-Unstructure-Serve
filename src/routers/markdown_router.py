@@ -15,16 +15,13 @@ from src.services.markdown_service import markdown_to_docx_bytes
 router = APIRouter()
 
 _DEFAULT_REFERENCE_DOC = (
-    Path(__file__).resolve().parent.parent
-    / "services"
-    / "templates"
-    / "default_reference.docx"
+    Path(__file__).resolve().parent.parent / "services" / "templates" / "default_reference.docx"
 )
 
 
 @router.post(
     "/markdown/docx",
-    summary="Create a software copyright DOCX from supplied Markdown",
+    summary="Create a DOCX from supplied Markdown",
     response_description="DOCX file download",
 )
 async def export_markdown_docx_file(
@@ -34,10 +31,7 @@ async def export_markdown_docx_file(
     ),
     reference_doc: UploadFile | str | None = File(
         None,
-        description=(
-            "Optional DOCX template upload to style the output; defaults to the"
-            " software copyright template"
-        ),
+        description=("Optional DOCX template upload to style the output document."),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ),
 ):

@@ -4,6 +4,7 @@ import toml
 
 config = toml.load(".secrets/secrets.toml")
 
+
 def _bool_from_env(var_name: str, default: bool) -> bool:
     """Read boolean flags from the environment while keeping TOML defaults."""
     raw_value = os.getenv(var_name)

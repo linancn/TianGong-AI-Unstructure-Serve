@@ -12,8 +12,8 @@ from typing import Final
 _DEFAULT_MARKDOWN_FILENAME: Final[str] = "document.md"
 _DEFAULT_DOCX_FILENAME: Final[str] = "document.docx"
 _DEFAULT_PANDOC_FROM: Final[str] = (
-    "gfm-hard_line_breaks+emoji"
-)  # GitHub-flavoured markdown with emoji, but without hard breaks that flatten headings
+    "gfm-hard_line_breaks+emoji"  # GitHub-flavoured markdown with emoji, but without hard breaks that flatten headings
+)
 _HEADING_LINE_PATTERN = re.compile(r"^(#{1,6})\s+(.+)$")
 
 
@@ -101,11 +101,7 @@ def _resolve_reference_doc(reference_doc_path: str | None) -> str | None:
     candidate_path = reference_doc_path
 
     if not candidate_path:
-        default_candidate = (
-            Path(__file__).resolve().parent
-            / "templates"
-            / "default_reference.docx"
-        )
+        default_candidate = Path(__file__).resolve().parent / "templates" / "default_reference.docx"
         return str(default_candidate) if default_candidate.exists() else None
 
     resolved_path = Path(candidate_path).expanduser().resolve()
