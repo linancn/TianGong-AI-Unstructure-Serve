@@ -1,4 +1,4 @@
-"""FastAPI router for turning Markdown strings into downloadable DOCX files."""
+"""FastAPI router exposing Markdown-to-DOCX conversion endpoints."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ async def export_markdown_docx_file(
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ),
 ):
-    """Return a DOCX file generated from Markdown using Pandoc."""
+    """Return a DOCX file generated from Markdown, with optional template styling."""
 
     reference_doc_path: str | None = None
     cleanup_path: Path | None = None

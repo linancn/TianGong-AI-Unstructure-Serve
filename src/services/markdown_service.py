@@ -39,8 +39,8 @@ def markdown_to_docx_bytes(
 ) -> tuple[str, bytes]:
     """Return DOCX bytes converted from Markdown using Pandoc.
 
-    The conversion is tuned for software copyright statements by allowing an
-    explicit *reference_doc_path* or falling back to the bundled DOCX template.
+    Accepts an optional *reference_doc_path* to control styling and falls back
+    to the bundled DOCX template when none is supplied.
     """
 
     if content is None:
