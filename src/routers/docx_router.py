@@ -1,9 +1,10 @@
 import tempfile
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from src.models.models import ResponseWithoutPageNum
 from src.services.docx_service import unstructure_docx
+from src.utils.response_utils import json_response, pretty_response_flag
 
 router = APIRouter()
 
@@ -14,7 +15,10 @@ router = APIRouter()
     response_model=ResponseWithoutPageNum,
     response_description="List of text chunks (no page numbers)",
 )
-async def docx(file: UploadFile = File(...)):
+async def docx(
+    file: UploadFile = File(...),
+    pretty: bool = Depends(pretty_response_flag),
+):
     """
     Extract plain-text chunks from an uploaded .docx file.
 
@@ -27,6 +31,7 @@ async def docx(file: UploadFile = File(...)):
 
         try:
             result = unstructure_docx(tmp_path)
-            return ResponseWithoutPageNum.from_result(result)
+            response_model = ResponseWithoutPageNum.from_result(result)
+            return json_response(response_model, pretty)
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))

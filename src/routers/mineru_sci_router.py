@@ -1,10 +1,11 @@
 import tempfile
 import os
 import asyncio
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from src.models.models import ResponseWithPageNum, TextElementWithPageNum
 from src.services.gpu_scheduler import scheduler
+from src.utils.response_utils import json_response, pretty_response_flag
 
 router = APIRouter()
 
@@ -19,7 +20,10 @@ PARSE_TIMEOUT = int(os.getenv("MINERU_SCI_TIMEOUT_SECONDS", "110"))
     response_model=ResponseWithPageNum,
     response_description="List of text chunks with page numbers",
 )
-async def mineru(file: UploadFile = File(...)):
+async def mineru(
+    file: UploadFile = File(...),
+    pretty: bool = Depends(pretty_response_flag),
+):
     """
     Use MinerU (sci pipeline) to parse scientific/academic documents and return
     text chunks with page numbers.
@@ -65,7 +69,8 @@ async def mineru(file: UploadFile = File(...)):
         ]
         # The sci service has its own filtering logic, which is now inside the worker.
         # We just need to reconstruct the response.
-        return ResponseWithPageNum(result=items)
+        response_model = ResponseWithPageNum(result=items)
+        return json_response(response_model, pretty)
     except TimeoutError as e:  # from hard timeout in worker layer
         raise HTTPException(status_code=504, detail=str(e))
     except Exception as e:

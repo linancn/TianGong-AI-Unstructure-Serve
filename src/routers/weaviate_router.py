@@ -1,7 +1,7 @@
 import os
 import re
 import tempfile
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from typing import List, Optional
 import json
 
@@ -9,6 +9,7 @@ from src.models.models import InsertSummary, ResponseWithPageNum, TextElementWit
 from src.services.gpu_scheduler import scheduler
 from src.services.weaviate_service import insert_text_chunks
 from src.services.docx_service import unstructure_docx
+from src.utils.response_utils import json_response, pretty_response_flag
 
 router = APIRouter()
 
@@ -64,6 +65,7 @@ async def ingest_to_weaviate(
     tags: Optional[str] = Form(
         None, description="Optional tags as JSON array or comma-separated string"
     ),
+    pretty: bool = Depends(pretty_response_flag),
 ):
     """
     Parse the uploaded document and insert chunks into Weaviate.
@@ -143,7 +145,8 @@ async def ingest_to_weaviate(
                 source=filename,
                 tags=parsed_tags,
             )
-        return InsertSummary(**summary)
+        response_model = InsertSummary(**summary)
+        return json_response(response_model, pretty)
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001
@@ -168,6 +171,7 @@ async def ingest_to_weaviate_with_images(
     tags: Optional[str] = Form(
         None, description="Optional tags as JSON array or comma-separated string"
     ),
+    pretty: bool = Depends(pretty_response_flag),
 ):
     """
     Use MinerU-with-images to parse an uploaded PDF and insert chunks into Weaviate
@@ -237,7 +241,8 @@ async def ingest_to_weaviate_with_images(
             source=filename,  # 使用完整文件名
             tags=parsed_tags,
         )
-        return InsertSummary(**summary)
+        response_model = InsertSummary(**summary)
+        return json_response(response_model, pretty)
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001

@@ -1,10 +1,11 @@
 import os
 import tempfile
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from src.models.models import ResponseWithPageNum, TextElementWithPageNum
 from src.services.gpu_scheduler import scheduler
+from src.utils.response_utils import json_response, pretty_response_flag
 
 router = APIRouter()
 
@@ -18,7 +19,10 @@ ALLOWED_EXTENSIONS = [".pdf", ".png", ".jpeg", ".jpg"]
     response_model=ResponseWithPageNum,
     response_description="List of text chunks with page numbers",
 )
-async def mineru_with_images(file: UploadFile = File(...)):
+async def mineru_with_images(
+    file: UploadFile = File(...),
+    pretty: bool = Depends(pretty_response_flag),
+):
     """
     Use MinerU with image-aware extraction (figures/tables) and return text chunks with page numbers.
 
@@ -54,7 +58,8 @@ async def mineru_with_images(file: UploadFile = File(...)):
             TextElementWithPageNum(text=it["text"], page_number=int(it["page_number"]))
             for it in payload.get("result", [])
         ]
-        return ResponseWithPageNum(result=items)
+        response_model = ResponseWithPageNum(result=items)
+        return json_response(response_model, pretty)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
