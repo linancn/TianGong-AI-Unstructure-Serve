@@ -6,15 +6,18 @@ import os
 import re
 import subprocess
 import tempfile
+from functools import lru_cache
 from pathlib import Path
 from typing import Final
 
 _DEFAULT_MARKDOWN_FILENAME: Final[str] = "document.md"
 _DEFAULT_DOCX_FILENAME: Final[str] = "document.docx"
-_DEFAULT_PANDOC_FROM: Final[str] = (
-    "gfm-hard_line_breaks+emoji"  # GitHub-flavoured markdown with emoji, but without hard breaks that flatten headings
+_GFM_PANDOC_FROM: Final[str] = (
+    "gfm-hard_line_breaks+emoji"  # GitHub-flavoured markdown without hard breaks flattening headings
 )
 _HEADING_LINE_PATTERN = re.compile(r"^(#{1,6})\s+(.+)$")
+_TABLE_CAPTION_LEAD_PATTERN = re.compile(r"([^\n])\n(:[^\n]*\n)")
+_TABLE_CAPTION_PATTERN = re.compile(r"(^|\n)(:[^\n]*?)\n(\|)")
 
 
 def markdown_bytes(content: str, filename: str | None = None) -> tuple[str, bytes]:
@@ -50,7 +53,10 @@ def markdown_to_docx_bytes(
     normalized_content = _normalize_markdown(content)
     reference_doc = _resolve_reference_doc(reference_doc_path)
 
-    pandoc_cmd = [_pandoc_executable(), f"--from={_DEFAULT_PANDOC_FROM}", "--to=docx"]
+    pandoc_cmd = [_pandoc_executable(), f"--from={_pandoc_from()}", "--to=docx"]
+
+    for lua_filter in _pandoc_filters():
+        pandoc_cmd.extend(["--lua-filter", lua_filter])
 
     if reference_doc:
         pandoc_cmd.extend(["--reference-doc", reference_doc])
@@ -111,14 +117,71 @@ def _resolve_reference_doc(reference_doc_path: str | None) -> str | None:
     return str(resolved_path)
 
 
+def _pandoc_filters() -> list[str]:
+    filters: list[str] = []
+    filters_dir = Path(__file__).resolve().parent / "filters"
+
+    for name in ("pagebreak.lua", "figure_caption.lua"):
+        candidate = filters_dir / name
+        if candidate.exists():
+            filters.append(str(candidate))
+
+    return filters
+
+
 def _pandoc_executable() -> str:
     """Allow overriding the pandoc executable via environment variable."""
 
     return os.getenv("PANDOC_PATH", "pandoc")
 
 
+@lru_cache(maxsize=1)
+def _pandoc_from() -> str:
+    """Choose a Pandoc input format; stay on GFM, add raw_tex only if supported."""
+
+    raw_tex = "raw_tex"
+
+    if _pandoc_supports_extension("gfm", raw_tex):
+        return f"{_GFM_PANDOC_FROM}+{raw_tex}"
+
+    return _GFM_PANDOC_FROM
+
+
+def _pandoc_supports_extension(format_name: str, extension: str) -> bool:
+    try:
+        proc = subprocess.run(
+            [_pandoc_executable(), f"--list-extensions={format_name}"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return False
+
+    for line in proc.stdout.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        if stripped[0] in {"+", "-"}:
+            stripped = stripped[1:]
+
+        if stripped == extension:
+            return True
+
+    return False
+
+
 def _normalize_markdown(content: str) -> str:
     """Tidy headings so Pandoc reliably recognises heading levels."""
+
+    content = _TABLE_CAPTION_LEAD_PATTERN.sub(
+        lambda match: f"{match.group(1)}\n\n{match.group(2)}", content
+    )
+    content = _TABLE_CAPTION_PATTERN.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}\n\n{match.group(3)}", content
+    )
 
     lines = content.splitlines()
     normalised_lines: list[str] = []
