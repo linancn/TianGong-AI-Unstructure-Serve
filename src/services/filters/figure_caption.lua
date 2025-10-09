@@ -75,7 +75,12 @@ local function register_label(kind, identifier)
 end
 
 local function make_figure_block(image, identifier, extra_classes)
+  -- 将图片段落包装并添加居中样式
   local img_para = pandoc.Para({ image })
+  local centered_img = pandoc.Div({ img_para }, 
+    pandoc.Attr('', {}, { ['custom-style'] = 'FigureImage' }))
+  
+  -- 图片标题（在图片下方）
   local caption = caption_block(clone_inlines(image.caption))
 
   local classes = { 'figure' }
@@ -88,7 +93,8 @@ local function make_figure_block(image, identifier, extra_classes)
   local attr = pandoc.Attr(identifier or '', classes, {})
   register_label('fig', attr.identifier)
 
-  return pandoc.Div({ img_para, caption }, attr)
+  -- 图片在上，标题在下
+  return pandoc.Div({ centered_img, caption }, attr)
 end
 
 local function push_para(result, inlines)
@@ -185,7 +191,7 @@ end
 
 local function table_caption_block(inlines)
   local para = pandoc.Para(inlines)
-  return pandoc.Div({ para }, pandoc.Attr('', {}, { ['custom-style'] = 'Caption' }))
+  return pandoc.Div({ para }, pandoc.Attr('', {}, { ['custom-style'] = 'TableCaption' }))
 end
 
 local function ensure_table_identifier(raw_id)
@@ -214,9 +220,19 @@ local function transform_blocks(blocks)
         local identifier = ensure_table_identifier(info.identifier or '')
         register_label('tbl', identifier)
 
+        -- 表格标题在上方，使用自定义 TableCaption 样式
         local caption = table_caption_block(info.caption_inlines)
-        local div_attr = pandoc.Attr(identifier, { 'table' }, {})
-        table.insert(transformed, pandoc.Div({ tbl, caption }, div_attr))
+        
+        -- 设置表格的标识符，但不添加额外的样式包装
+        -- 让 Pandoc 使用模板中的默认 Table 样式
+        if identifier and identifier ~= '' then
+          tbl.attr = pandoc.Attr(identifier, { 'table' }, {})
+        end
+        
+        -- 先添加标题，再添加表格本身
+        -- 表格不做额外包装，直接使用 Pandoc 的默认样式
+        table.insert(transformed, caption)
+        table.insert(transformed, tbl)
 
         i = i + 2
         goto continue
