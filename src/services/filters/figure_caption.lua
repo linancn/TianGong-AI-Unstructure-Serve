@@ -4,11 +4,13 @@ Convert standalone images into a figure with a caption paragraph styled for DOCX
 GFM does not enable implicit figures, so an image like ![Caption](url) becomes a
 plain Image inline without caption styling. This filter keeps the image inline but
 inserts a following paragraph that reuses the alt text as visible caption text,
-applying the "Caption" style so users can tweak it via reference.docx.
+applying a dedicated "FigureCaption" style so users can tweak it via reference.docx.
 
 The filter leaves images without alt text untouched and preserves the alt text
 on the image for accessibility purposes.
 ]]
+
+local FIGURE_CAPTION_STYLE = 'FigureCaption'
 
 local label_counts = {}
 local label_numbers = {}
@@ -19,7 +21,7 @@ end
 
 local function caption_block(inlines)
   local para = pandoc.Para(inlines)
-  return pandoc.Div({ para }, pandoc.Attr('', {}, { ['custom-style'] = 'Caption' }))
+  return pandoc.Div({ para }, pandoc.Attr('', {}, { ['custom-style'] = FIGURE_CAPTION_STYLE }))
 end
 
 local function clone_inlines(src)
