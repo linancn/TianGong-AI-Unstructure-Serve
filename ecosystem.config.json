@@ -9,8 +9,15 @@
       "env": {
         "GPU_IDS": "0,1,2",
         "MINERU_MODEL_SOURCE": "modelscope",
+        "MINERU_TASK_HARD_TIMEOUT_SECONDS": "1800",
+        "MINERU_DEFAULT_HARD_TIMEOUT_SECONDS": "1800",
+        "MINERU_IMAGES_HARD_TIMEOUT_SECONDS": "1800",
+        "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
+        "MINERU_SCI_TIMEOUT_SECONDS": "110",
         "TABLE_OCR": "paddle",
         "VISION_PROVIDER": "gemini",
+        "VISION_MODEL": "gemini-2.5-flash",
+        "VISION_CONTEXT_WINDOW": "4",
         "OCR_AGENT": "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle"
       },
       "out_file": "gunicorn.log",

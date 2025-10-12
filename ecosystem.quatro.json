@@ -9,10 +9,15 @@
       "env": {
         "GPU_IDS": "0",
         "MINERU_MODEL_SOURCE": "modelscope",
+        "MINERU_TASK_HARD_TIMEOUT_SECONDS": "1800",
+        "MINERU_DEFAULT_HARD_TIMEOUT_SECONDS": "1800",
+        "MINERU_IMAGES_HARD_TIMEOUT_SECONDS": "1800",
         "TABLE_OCR": "paddle",
         "VISION_PROVIDER": "gemini",
         "MINERU_SCI_TIMEOUT_SECONDS": "110",
         "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
+        "VISION_MODEL": "gemini-2.5-flash",
+        "VISION_CONTEXT_WINDOW": "4",
         "OCR_AGENT": "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle"
       },
       "out_file": "gunicorn-0.log",
@@ -28,10 +33,15 @@
       "env": {
         "GPU_IDS": "1",
         "MINERU_MODEL_SOURCE": "modelscope",
+        "MINERU_TASK_HARD_TIMEOUT_SECONDS": "1800",
+        "MINERU_DEFAULT_HARD_TIMEOUT_SECONDS": "1800",
+        "MINERU_IMAGES_HARD_TIMEOUT_SECONDS": "1800",
         "TABLE_OCR": "paddle",
         "VISION_PROVIDER": "gemini",
         "MINERU_SCI_TIMEOUT_SECONDS": "110",
         "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
+        "VISION_MODEL": "gemini-2.5-flash",
+        "VISION_CONTEXT_WINDOW": "4",
         "OCR_AGENT": "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle"
       },
       "out_file": "gunicorn-1.log",
@@ -47,10 +57,15 @@
       "env": {
         "GPU_IDS": "2",
         "MINERU_MODEL_SOURCE": "modelscope",
+        "MINERU_TASK_HARD_TIMEOUT_SECONDS": "1800",
+        "MINERU_DEFAULT_HARD_TIMEOUT_SECONDS": "1800",
+        "MINERU_IMAGES_HARD_TIMEOUT_SECONDS": "1800",
         "TABLE_OCR": "paddle",
         "VISION_PROVIDER": "gemini",
         "MINERU_SCI_TIMEOUT_SECONDS": "110",
         "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
+        "VISION_MODEL": "gemini-2.5-flash",
+        "VISION_CONTEXT_WINDOW": "4",
         "OCR_AGENT": "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle"
       },
       "out_file": "gunicorn-2.log",
@@ -66,10 +81,15 @@
       "env": {
         "GPU_IDS": "3",
         "MINERU_MODEL_SOURCE": "modelscope",
+        "MINERU_TASK_HARD_TIMEOUT_SECONDS": "1800",
+        "MINERU_DEFAULT_HARD_TIMEOUT_SECONDS": "1800",
+        "MINERU_IMAGES_HARD_TIMEOUT_SECONDS": "1800",
         "TABLE_OCR": "paddle",
         "VISION_PROVIDER": "gemini",
         "MINERU_SCI_TIMEOUT_SECONDS": "110",
         "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
+        "VISION_MODEL": "gemini-2.5-flash",
+        "VISION_CONTEXT_WINDOW": "4",
         "OCR_AGENT": "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle"
       },
       "out_file": "gunicorn-3.log",
