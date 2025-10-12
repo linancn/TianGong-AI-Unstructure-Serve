@@ -19,9 +19,34 @@ def _resolve_api_key() -> str:
     return _FALLBACK_API_KEY
 
 
+def _resolve_base_url() -> Optional[str]:
+    env_override = os.getenv("VLLM_BASE_URL")
+    if env_override and env_override.strip():
+        return env_override.strip()
+    if VLLM_BASE_URL and VLLM_BASE_URL.strip():
+        return VLLM_BASE_URL.strip()
+    return None
+
+
+def _has_configured_api_key() -> bool:
+    env_override = os.getenv("VLLM_API_KEY")
+    if env_override and env_override.strip():
+        return True
+    if VLLM_API_KEY and VLLM_API_KEY.strip():
+        return True
+    return False
+
+
+def has_vllm_credentials() -> bool:
+    return bool(_resolve_base_url() or _has_configured_api_key())
+
+
 _client: Optional[OpenAI] = None
-if VLLM_BASE_URL:
-    _client = OpenAI(api_key=_resolve_api_key(), base_url=VLLM_BASE_URL.strip())
+_base_url = _resolve_base_url()
+if _base_url:
+    _client = OpenAI(api_key=_resolve_api_key(), base_url=_base_url)
+elif _has_configured_api_key():
+    _client = OpenAI(api_key=_resolve_api_key())
 
 
 # Function to encode the image
@@ -39,7 +64,7 @@ def _resolve_model(explicit: Optional[str] = None) -> str:
 def _get_client() -> OpenAI:
     if _client is None:
         raise RuntimeError(
-            "vLLM vision client is not configured. Ensure VLLM_BASE_URL is set (API key optional)."
+            "vLLM vision client is not configured. Set VLLM_BASE_URL or VLLM_API_KEY."
         )
     return _client
 

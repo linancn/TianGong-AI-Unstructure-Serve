@@ -2,19 +2,14 @@ import os
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, Union
 
 from loguru import logger
 
-from src.config.config import (
-    GENIMI_API_KEY,
-    OPENAI_API_KEY,
-    VLLM_API_KEY,
-    VLLM_BASE_URL,
-)
+from src.config.config import GENIMI_API_KEY, OPENAI_API_KEY
 from src.services.vision_service_genimi import vision_completion_genimi
 from src.services.vision_service_openai import vision_completion_openai
-from src.services.vision_service_vllm import vision_completion_vllm
+from src.services.vision_service_vllm import has_vllm_credentials, vision_completion_vllm
 
 
 @dataclass(frozen=True)
@@ -55,7 +50,7 @@ def _base_providers() -> Dict[str, ProviderSpec]:
             models=["Qwen/Qwen2.5-VL-72B-Instruct-AWQ"],
             default_model="Qwen/Qwen2.5-VL-72B-Instruct-AWQ",
             call=vision_completion_vllm,
-            has_credentials=lambda: bool(VLLM_BASE_URL),
+            has_credentials=has_vllm_credentials,
         ),
     }
 
@@ -114,12 +109,17 @@ def _load_provider_specs() -> Dict[str, ProviderSpec]:
 PROVIDER_SPECS: Dict[str, ProviderSpec] = _load_provider_specs()
 
 
-VisionProvider = Enum(
-    "VisionProvider",
-    {spec.key.upper(): spec.key for spec in PROVIDER_SPECS.values()},
-    module=__name__,
-    type=str,
-)
+if TYPE_CHECKING:
+
+    class VisionProvider(str, Enum): ...
+
+else:
+    VisionProvider = Enum(
+        "VisionProvider",
+        {spec.key.upper(): spec.key for spec in PROVIDER_SPECS.values()},
+        module=__name__,
+        type=str,
+    )
 
 
 def _sanitize_model_member(provider_key: str, model_name: str) -> str:
@@ -152,7 +152,13 @@ def _build_model_enum() -> Tuple[Enum, Dict[str, VisionProvider]]:
     )
 
 
-VisionModel, MODEL_PROVIDER_LOOKUP = _build_model_enum()
+if TYPE_CHECKING:
+
+    class VisionModel(str, Enum): ...
+
+    MODEL_PROVIDER_LOOKUP: Dict[str, VisionProvider]
+else:
+    VisionModel, MODEL_PROVIDER_LOOKUP = _build_model_enum()
 
 
 DEFAULT_MODELS = {
@@ -240,9 +246,7 @@ def vision_completion(
     result: Optional[str] = None
 
     if chosen_spec.has_credentials():
-        logger.info(
-            f"Vision request using provider='{chosen.value}' model='{resolved_model}'"
-        )
+        logger.info(f"Vision request using provider='{chosen.value}' model='{resolved_model}'")
         try:
             result = chosen_spec.call(image_path, context, resolved_model)
             if result is not None:
@@ -266,9 +270,7 @@ def vision_completion(
         if not backup_spec.has_credentials():
             continue
         fallback_model = DEFAULT_MODELS.get(backup, backup_spec.default_model)
-        logger.info(
-            f"Vision fallback to provider='{backup.value}' model='{fallback_model}'"
-        )
+        logger.info(f"Vision fallback to provider='{backup.value}' model='{fallback_model}'")
         try:
             fallback_result = backup_spec.call(image_path, context, fallback_model)
             if fallback_result is not None:
