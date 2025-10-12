@@ -46,10 +46,12 @@ def _table_text(item: dict) -> str:
 
 def _actual_parse(file_path: str, pipeline: str) -> List[Dict[str, int]]:
     """Inner heavy parse logic (run inside an isolated subprocess watchdog)."""
+    if pipeline == "images":
+        from src.services.mineru_with_images_service import parse_with_images
+
+        return parse_with_images(file_path)
     if pipeline == "sci":
         from src.services.mineru_sci_service import parse_doc
-    elif pipeline == "images":
-        from src.services.mineru_with_images_service import parse_doc
     else:  # default
         from src.services.mineru_service_full import parse_doc
 

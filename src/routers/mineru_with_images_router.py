@@ -53,11 +53,24 @@ async def mineru_with_images(
         # Dispatch to GPU scheduler; this returns a Future
         fut = scheduler.submit(tmp_path, pipeline="images")
         payload = await _await_future(fut)
-        # Map back into Pydantic model
-        items = [
-            TextElementWithPageNum(text=it["text"], page_number=int(it["page_number"]))
-            for it in payload.get("result", [])
-        ]
+        result_payload = payload.get("result")
+        if not isinstance(result_payload, list):
+            raise HTTPException(
+                status_code=500,
+                detail="Invalid scheduler response payload for MinerU with images.",
+            )
+
+        items = []
+        for it in result_payload:
+            try:
+                text = it["text"]
+                page_number = int(it["page_number"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Malformed item returned by MinerU scheduler: {exc}",
+                )
+            items.append(TextElementWithPageNum(text=text, page_number=page_number))
         response_model = ResponseWithPageNum(result=items)
         return json_response(response_model, pretty)
     except Exception as e:

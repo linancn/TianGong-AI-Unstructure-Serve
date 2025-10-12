@@ -1,7 +1,7 @@
 import os
 import re
 import tempfile
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from loguru import logger
 
@@ -145,28 +145,37 @@ def _resolve_context_windows(
     return {"before": before_ctx, "after": after_ctx}
 
 
-def _build_vision_prompt(item: Dict, contexts: Dict[str, str]) -> str:
+def _build_vision_prompt(
+    item: Dict, contexts: Dict[str, str]
+) -> Tuple[str, List[Tuple[str, str]]]:
     captions = "\n".join(item.get("img_caption") or [])
     footnotes = "\n".join(item.get("img_footnote") or [])
-    prompt_parts: List[str] = []
+    prompt_parts: List[Tuple[str, str]] = []
     if captions.strip():
-        prompt_parts.append(f"Image caption: {captions}")
+        prompt_parts.append(("Image caption", captions))
     if footnotes.strip():
-        prompt_parts.append(f"Image footnote: {footnotes}")
+        prompt_parts.append(("Image footnote", footnotes))
     if contexts["before"].strip():
-        prompt_parts.append(f"Context before: {contexts['before']}")
+        prompt_parts.append(("Context before", contexts["before"]))
     if contexts["after"].strip():
-        prompt_parts.append(f"Context after: {contexts['after']}")
-    return "\n".join(prompt_parts)
+        prompt_parts.append(("Context after", contexts["after"]))
+    prompt_lines = [f"{label}: {value}" for label, value in prompt_parts]
+    return "\n".join(prompt_lines), prompt_parts
 
 
-def _log_vision_context(item: Dict, contexts: Dict[str, str], prompt: str) -> None:
-    page_number = int(item.get("page_idx", 0)) + 1
-    before_ctx = contexts["before"] or "<empty>"
-    after_ctx = contexts["after"] or "<empty>"
-    logger.info(f"Vision context for page {page_number} | before: {before_ctx} | after: {after_ctx}")
-    if prompt:
-        logger.info(f"Vision prompt composed for page {page_number}:\n{prompt}")
+def _log_vision_prompt(
+    page_number: int, contexts: Dict[str, str], prompt_parts: Sequence[Tuple[str, str]]
+) -> None:
+    before_ctx = contexts.get("before", "").strip() or "<empty>"
+    after_ctx = contexts.get("after", "").strip() or "<empty>"
+    # logger.info(
+    #     f"Vision context for page {page_number}\n  before: {before_ctx}\n  after: {after_ctx}"
+    # )
+    if prompt_parts:
+        formatted = "\n".join(f"  {label}: {value}" for label, value in prompt_parts)
+        logger.info(f"Vision prompt payload for page {page_number}:\n{formatted}")
+    else:
+        logger.info(f"Vision prompt payload for page {page_number}: <empty>")
 
 
 def parse_with_images(file_path: str) -> List[Dict[str, object]]:
@@ -207,8 +216,8 @@ def parse_with_images(file_path: str) -> List[Dict[str, object]]:
                 )
 
                 contexts = _resolve_context_windows(working_blocks, cur_idx, item)
-                prompt = _build_vision_prompt(item, contexts)
-                _log_vision_context(item, contexts, prompt)
+                prompt, prompt_parts = _build_vision_prompt(item, contexts)
+                _log_vision_prompt(page_number, contexts, prompt_parts)
 
                 logger.info(f"Image path: {img_path}")
                 logger.info(f"Calling vision completion for image {image_count}/{total_images}...")
