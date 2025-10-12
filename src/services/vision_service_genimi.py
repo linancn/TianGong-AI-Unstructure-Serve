@@ -14,7 +14,7 @@ def vision_completion_genimi(image_path: str, context: str = "") -> str:
         prompt = f"Analyze this image with the following context:\n{context}\nDescribe the image considering this context. Only return neat facts in the language of the context."
 
     response = client.models.generate_content(
-        model="gemini-2.5-flash-preview-05-20", contents=[image, prompt]
+        model="gemini-2.5-flash", contents=[image, prompt]
     )
 
     return response.text
