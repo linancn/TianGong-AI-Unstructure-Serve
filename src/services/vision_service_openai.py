@@ -1,10 +1,14 @@
 import base64
+import os
 
 from openai import OpenAI
 
 from src.config.config import OPENAI_API_KEY
 
 client = OpenAI(api_key=OPENAI_API_KEY)
+
+DEFAULT_VISION_MODEL = "gpt-5-mini"
+VISION_MODEL = os.getenv("VISION_MODEL", DEFAULT_VISION_MODEL)
 
 
 # Function to encode the image
@@ -21,7 +25,7 @@ def vision_completion_openai(image_path: str, context: str = "") -> str:
         prompt = f"Analyze this image with the following context:\n{context}\nDescribe the image considering this context. Only return neat facts in the language of the context."
 
     response = client.chat.completions.create(
-        model="gpt-5-mini",
+        model=VISION_MODEL,
         messages=[
             {
                 "role": "user",
