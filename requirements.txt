@@ -1,16 +1,38 @@
+# Core Web Framework
 fastapi
-google-genai
-gunicorn
-mineru[all]
-openai
-pdf2image
-pillow
-py-zerox
-python-dotenv
-tenacity
-tiktoken
-toml
-torch
-unstructured[docx,pptx]
 uvicorn[standard]
+gunicorn
+pydantic
+
+# Environment & Config
+python-dotenv
+toml
+
+# AI & ML Services
+openai
+google-genai
+mineru[all]
+py-zerox
+
+# Document Processing
+unstructured[docx,pptx]
+python-pptx
+pillow
+
+# Data Processing
+beautifulsoup4
+pandas
+tiktoken
+
+# Vector Database
 weaviate-client
+
+# Logging
+loguru
+
+# Explicit dependencies (these are indirect deps, but listed for clarity)
+# You can remove these lines and let pip resolve them automatically
+pdf2image
+tenacity
+torch
+protobuf

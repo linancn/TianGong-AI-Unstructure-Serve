@@ -1,0 +1,16 @@
+fastapi
+google-genai
+gunicorn
+mineru[all]
+openai
+pdf2image
+pillow
+py-zerox
+python-dotenv
+tenacity
+tiktoken
+toml
+torch
+unstructured[docx,pptx]
+uvicorn[standard]
+weaviate-client
