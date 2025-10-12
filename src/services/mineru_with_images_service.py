@@ -1,13 +1,17 @@
 import os
 import re
 import tempfile
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 from loguru import logger
 
 from src.models.models import ResponseWithPageNum, TextElementWithPageNum
 from src.services.mineru_service_full import parse_doc
-from src.services.vision_service import vision_completion
+from src.services.vision_service import (
+    VisionModel,
+    VisionProvider,
+    vision_completion,
+)
 
 
 def _env_context_window() -> int:
@@ -163,9 +167,7 @@ def _resolve_context_windows(
     return {"before": before_ctx, "after": after_ctx}
 
 
-def _build_vision_prompt(
-    item: Dict, contexts: Dict[str, str]
-) -> Tuple[str, List[Tuple[str, str]]]:
+def _build_vision_prompt(item: Dict, contexts: Dict[str, str]) -> Tuple[str, List[Tuple[str, str]]]:
     captions = "\n".join(item.get("img_caption") or [])
     footnotes = "\n".join(item.get("img_footnote") or [])
     prompt_parts: List[Tuple[str, str]] = []
@@ -196,7 +198,12 @@ def _log_vision_prompt(
         logger.info(f"Vision prompt payload for page {page_number}: <empty>")
 
 
-def parse_with_images(file_path: str) -> List[Dict[str, object]]:
+def parse_with_images(
+    file_path: str,
+    *,
+    vision_provider: Optional[VisionProvider] = None,
+    vision_model: Optional[Union[VisionModel, str]] = None,
+) -> List[Dict[str, object]]:
     """Run MinerU parsing (GPU scheduler friendly) then enrich figures via multimodal vision."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         content_list, output_dir = parse_doc([file_path], tmp_dir)
@@ -208,9 +215,7 @@ def parse_with_images(file_path: str) -> List[Dict[str, object]]:
         total_images = sum(
             1
             for item in content_list
-            if item["type"] == "image"
-            and item.get("img_path")
-            and item["img_path"].strip()
+            if item["type"] == "image" and item.get("img_path") and item["img_path"].strip()
         )
         image_count = 0
 
@@ -218,14 +223,12 @@ def parse_with_images(file_path: str) -> List[Dict[str, object]]:
             cur_idx = item_to_block_idx.get(id(item))
             page_number = int(item.get("page_idx", 0)) + 1
 
-            if (
-                item["type"] == "image"
-                and item.get("img_path")
-                and item["img_path"].strip()
-            ):
+            if item["type"] == "image" and item.get("img_path") and item["img_path"].strip():
                 img_path = os.path.join(output_dir, item["img_path"])
                 if not os.path.exists(img_path):
-                    logger.info(f"Skipping image on page {page_number}: file not found at {img_path}")
+                    logger.info(
+                        f"Skipping image on page {page_number}: file not found at {img_path}"
+                    )
                     continue
 
                 image_count += 1
@@ -241,8 +244,17 @@ def parse_with_images(file_path: str) -> List[Dict[str, object]]:
                 logger.info(f"Calling vision completion for image {image_count}/{total_images}...")
 
                 try:
-                    vision_result = clean_text(vision_completion(img_path, prompt))
-                    logger.info(f"✓ Vision analysis complete for image {image_count}/{total_images}")
+                    vision_result = clean_text(
+                        vision_completion(
+                            img_path,
+                            prompt,
+                            provider=vision_provider,
+                            model=vision_model,
+                        )
+                    )
+                    logger.info(
+                        f"✓ Vision analysis complete for image {image_count}/{total_images}"
+                    )
 
                     vision_block = {
                         "type": "image_vision_desc",
@@ -266,17 +278,13 @@ def parse_with_images(file_path: str) -> List[Dict[str, object]]:
                         }
                     )
                 except Exception as exc:  # noqa: broad-except - vision call can fail
-                    logger.info(
-                        f"Error processing image {image_count}/{total_images}: {str(exc)}"
-                    )
+                    logger.info(f"Error processing image {image_count}/{total_images}: {str(exc)}")
                     img_txt = image_text(item)
                     if img_txt.strip():
                         result_items.append({"text": img_txt, "page_number": page_number})
 
             elif item["type"] in ("text", "equation") and item.get("text", "").strip():
-                result_items.append(
-                    {"text": clean_text(item["text"]), "page_number": page_number}
-                )
+                result_items.append({"text": clean_text(item["text"]), "page_number": page_number})
             elif item["type"] == "table" and (
                 item.get("table_caption") or item.get("table_body") or item.get("table_footnote")
             ):

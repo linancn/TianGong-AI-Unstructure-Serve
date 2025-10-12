@@ -6,7 +6,7 @@ import queue
 from concurrent.futures import ProcessPoolExecutor, Future
 from dataclasses import dataclass
 from threading import Lock
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 def _worker_init(gpu_id: str):
@@ -44,12 +44,15 @@ def _table_text(item: dict) -> str:
     return _clean_text(combined_text)
 
 
-def _actual_parse(file_path: str, pipeline: str) -> List[Dict[str, int]]:
+def _actual_parse(
+    file_path: str, pipeline: str, options: Optional[Dict[str, object]] = None
+) -> List[Dict[str, int]]:
     """Inner heavy parse logic (run inside an isolated subprocess watchdog)."""
+    options = options or {}
     if pipeline == "images":
         from src.services.mineru_with_images_service import parse_with_images
 
-        return parse_with_images(file_path)
+        return parse_with_images(file_path, **options)
     if pipeline == "sci":
         from src.services.mineru_sci_service import parse_doc
     else:  # default
@@ -79,16 +82,22 @@ def _actual_parse(file_path: str, pipeline: str) -> List[Dict[str, int]]:
         return results
 
 
-def _child_worker(q: multiprocessing.Queue, path: str, pipeline: str) -> None:
+def _child_worker(
+    q: multiprocessing.Queue, path: str, pipeline: str, options: Optional[Dict[str, object]]
+) -> None:
     """Wrapper run in a separate process to enforce a hard timeout."""  # pragma: no cover
     try:
-        data = _actual_parse(path, pipeline)
+        data = _actual_parse(path, pipeline, options)
         q.put({"ok": True, "data": data})
     except Exception as exc:  # noqa: broad-except - propagate failure info through queue
         q.put({"ok": False, "error": str(exc)})
 
 
-def _worker_process_file(file_path: str, pipeline: str) -> Dict[str, List[Dict[str, int]]]:
+def _worker_process_file(
+    file_path: str,
+    pipeline: str,
+    options: Optional[Dict[str, object]] = None,
+) -> Dict[str, List[Dict[str, int]]]:
     """Run MinerU parsing with a per-task hard timeout using an isolated child process.
 
     This prevents a single stuck PDF from blocking the GPU worker forever.
@@ -110,7 +119,9 @@ def _worker_process_file(file_path: str, pipeline: str) -> Dict[str, List[Dict[s
     result_queue: multiprocessing.Queue = multiprocessing.Queue(maxsize=1)
 
     proc = multiprocessing.Process(
-        target=_child_worker, args=(result_queue, file_path, pipeline), daemon=True
+        target=_child_worker,
+        args=(result_queue, file_path, pipeline, options),
+        daemon=True,
     )
     proc.start()
 
@@ -175,7 +186,12 @@ class GPUScheduler:
             exec_.pending += 1
             return exec_
 
-    def submit(self, file_path: str, pipeline: str = "default") -> Future:
+    def submit(
+        self,
+        file_path: str,
+        pipeline: str = "default",
+        **task_options: object,
+    ) -> Future:
         """Submit a file for processing; returns a Future yielding a JSON-serializable dict."""
         exec_ = self._pick_executor()
 
@@ -183,7 +199,7 @@ class GPUScheduler:
             with self._lock:
                 exec_.pending -= 1
 
-        fut = exec_.pool.submit(_worker_process_file, file_path, pipeline)
+        fut = exec_.pool.submit(_worker_process_file, file_path, pipeline, task_options or None)
         fut.add_done_callback(_done_cb)
         return fut
 

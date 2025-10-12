@@ -1,78 +1,284 @@
-import logging
 import os
-from typing import Literal, Optional
+import re
+from dataclasses import dataclass
+from enum import Enum
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
-from src.config.config import GENIMI_API_KEY, OPENAI_API_KEY
+from loguru import logger
+
+from src.config.config import (
+    GENIMI_API_KEY,
+    OPENAI_API_KEY,
+    VLLM_API_KEY,
+    VLLM_BASE_URL,
+)
 from src.services.vision_service_genimi import vision_completion_genimi
 from src.services.vision_service_openai import vision_completion_openai
+from src.services.vision_service_vllm import vision_completion_vllm
 
 
-Provider = Literal["openai", "gemini"]
+@dataclass(frozen=True)
+class ProviderSpec:
+    key: str
+    models: List[str]
+    default_model: str
+    call: Callable[[str, str, Optional[str]], str]
+    has_credentials: Callable[[], bool]
 
 
-def _resolve_provider(explicit: Optional[str] = None) -> Provider:
-    # Priority: explicit arg -> env var -> by available keys -> default openai
-    prov = (explicit or os.getenv("VISION_PROVIDER", "")).strip().lower()
-    if prov in ("openai", "gemini"):
-        return prov  # type: ignore[return-value]
+def _env_list(name: str, fallback: List[str]) -> List[str]:
+    raw = os.getenv(name)
+    if not raw:
+        return list(fallback)
+    items = [item.strip() for item in raw.split(",") if item.strip()]
+    return items or list(fallback)
 
-    if OPENAI_API_KEY:
-        return "openai"  # type: ignore[return-value]
-    if GENIMI_API_KEY:
-        return "gemini"  # type: ignore[return-value]
 
-    # Fallback
-    return "openai"  # type: ignore[return-value]
+def _base_providers() -> Dict[str, ProviderSpec]:
+    return {
+        "openai": ProviderSpec(
+            key="openai",
+            models=["gpt-5-mini"],
+            default_model="gpt-5-mini",
+            call=vision_completion_openai,
+            has_credentials=lambda: bool(OPENAI_API_KEY),
+        ),
+        "gemini": ProviderSpec(
+            key="gemini",
+            models=["gemini-2.5-flash"],
+            default_model="gemini-2.5-flash",
+            call=vision_completion_genimi,
+            has_credentials=lambda: bool(GENIMI_API_KEY),
+        ),
+        "vllm": ProviderSpec(
+            key="vllm",
+            models=["Qwen/Qwen2.5-VL-72B-Instruct-AWQ"],
+            default_model="Qwen/Qwen2.5-VL-72B-Instruct-AWQ",
+            call=vision_completion_vllm,
+            has_credentials=lambda: bool(VLLM_BASE_URL),
+        ),
+    }
+
+
+def _load_provider_specs() -> Dict[str, ProviderSpec]:
+    base_specs = _base_providers()
+    allowed = _env_list("VISION_PROVIDER_CHOICES", list(base_specs.keys()))
+
+    specs: Dict[str, ProviderSpec] = {}
+    for provider_key in allowed:
+        base = base_specs.get(provider_key)
+        if base is None:
+            logger.warning(
+                "Ignoring unsupported vision provider '%s' declared in VISION_PROVIDER_CHOICES.",
+                provider_key,
+            )
+            continue
+
+        models = _env_list(
+            f"VISION_MODELS_{provider_key.upper()}",
+            base.models,
+        )
+        if not models:
+            logger.warning(
+                "Skipping vision provider '%s' because it has no models configured.",
+                provider_key,
+            )
+            continue
+
+        default_model = (
+            os.getenv(f"VISION_DEFAULT_MODEL_{provider_key.upper()}") or base.default_model
+        ).strip()
+        if default_model not in models:
+            logger.warning(
+                "Default model '%s' is not listed for provider '%s'. Using '%s' instead.",
+                default_model,
+                provider_key,
+                models[0],
+            )
+            default_model = models[0]
+
+        specs[provider_key] = ProviderSpec(
+            key=provider_key,
+            models=models,
+            default_model=default_model,
+            call=base.call,
+            has_credentials=base.has_credentials,
+        )
+
+    if not specs:
+        raise RuntimeError("No vision providers configured. Check VISION_PROVIDER_CHOICES.")
+
+    return specs
+
+
+PROVIDER_SPECS: Dict[str, ProviderSpec] = _load_provider_specs()
+
+
+VisionProvider = Enum(
+    "VisionProvider",
+    {spec.key.upper(): spec.key for spec in PROVIDER_SPECS.values()},
+    module=__name__,
+    type=str,
+)
+
+
+def _sanitize_model_member(provider_key: str, model_name: str) -> str:
+    base = f"{provider_key}_{re.sub(r'[^0-9A-Za-z]+', '_', model_name)}"
+    sanitized = re.sub(r"_+", "_", base).strip("_")
+    return sanitized.upper() or f"{provider_key.upper()}_MODEL"
+
+
+def _build_model_enum() -> Tuple[Enum, Dict[str, VisionProvider]]:
+    members: Dict[str, str] = {}
+    lookup: Dict[str, VisionProvider] = {}
+
+    for provider_key, spec in PROVIDER_SPECS.items():
+        provider_enum = VisionProvider[provider_key.upper()]
+        for model_name in spec.models:
+            member_name = _sanitize_model_member(provider_key, model_name)
+            suffix = 2
+            while member_name in members:
+                member_name = f"{member_name}_{suffix}"
+                suffix += 1
+            members[member_name] = model_name
+            lookup[model_name] = provider_enum
+
+    if not members:
+        raise RuntimeError("No vision models configured.")
+
+    return (
+        Enum("VisionModel", members, module=__name__, type=str),
+        lookup,
+    )
+
+
+VisionModel, MODEL_PROVIDER_LOOKUP = _build_model_enum()
+
+
+DEFAULT_MODELS = {
+    VisionProvider[spec.key.upper()]: spec.default_model for spec in PROVIDER_SPECS.values()
+}
+
+AVAILABLE_PROVIDER_VALUES: List[str] = [spec.key for spec in PROVIDER_SPECS.values()]
+AVAILABLE_MODEL_VALUES: List[str] = list(MODEL_PROVIDER_LOOKUP.keys())
+
+
+def _normalize_provider(value: Optional[Union[VisionProvider, str]]) -> Optional[VisionProvider]:
+    if value is None:
+        return None
+    if isinstance(value, VisionProvider):
+        return value
+    candidate = value.strip().lower()
+    for provider in VisionProvider:
+        if provider.value == candidate:
+            return provider
+    return None
+
+
+def _resolve_provider(explicit: Optional[VisionProvider]) -> VisionProvider:
+    if explicit:
+        return explicit
+
+    env_provider = _normalize_provider(os.getenv("VISION_PROVIDER"))
+    if env_provider:
+        return env_provider
+
+    for provider in VisionProvider:
+        spec = PROVIDER_SPECS[provider.value]
+        if spec.has_credentials():
+            return provider
+
+    return next(iter(VisionProvider))
+
+
+def _model_value(model: Optional[Union[VisionModel, str]]) -> Optional[str]:
+    if model is None:
+        return None
+    if isinstance(model, VisionModel):
+        return model.value
+    candidate = model.strip()
+    return candidate or None
+
+
+def _resolve_model(
+    provider: VisionProvider,
+    explicit: Optional[Union[VisionModel, str]],
+) -> str:
+    explicit_value = _model_value(explicit)
+    if explicit_value:
+        return explicit_value
+
+    env_model = (os.getenv("VISION_MODEL") or "").strip()
+    if env_model and env_model in PROVIDER_SPECS[provider.value].models:
+        return env_model
+
+    return PROVIDER_SPECS[provider.value].default_model
+
+
+def _provider_from_model(model: Optional[Union[VisionModel, str]]) -> Optional[VisionProvider]:
+    model_value = _model_value(model)
+    if not model_value:
+        return None
+    return MODEL_PROVIDER_LOOKUP.get(model_value)
 
 
 def vision_completion(
-    image_path: str, context: str = "", provider: Optional[Provider] = None
+    image_path: str,
+    context: str = "",
+    provider: Optional[Union[VisionProvider, str]] = None,
+    model: Optional[Union[VisionModel, str]] = None,
 ) -> str:
-    """High-level vision completion API that routes to the configured provider.
+    explicit_provider = _normalize_provider(provider)
+    model_provider = _provider_from_model(model)
+    if explicit_provider and model_provider and explicit_provider != model_provider:
+        raise ValueError("Provided model does not match the requested provider.")
 
-    Selection order:
-      1) provider param (if given)
-      2) VISION_PROVIDER env var ("openai"|"gemini")
-      3) Presence of corresponding API keys
-      4) Default to "openai"
-    If the chosen provider fails, it will try the alternative if available.
-    """
-    chosen = _resolve_provider(provider)
+    chosen = _resolve_provider(explicit_provider or model_provider)
+    resolved_model = _resolve_model(chosen, model)
+    chosen_spec = PROVIDER_SPECS[chosen.value]
 
-    def _try_openai() -> Optional[str]:
-        if not OPENAI_API_KEY:
-            return None
+    result: Optional[str] = None
+
+    if chosen_spec.has_credentials():
+        logger.info(
+            f"Vision request using provider='{chosen.value}' model='{resolved_model}'"
+        )
         try:
-            return vision_completion_openai(image_path, context)
-        except Exception as e:
-            logging.info(f"OpenAI vision failed: {e}")
-            return None
-
-    def _try_gemini() -> Optional[str]:
-        if not GENIMI_API_KEY:
-            return None
-        try:
-            return vision_completion_genimi(image_path, context)
-        except Exception as e:
-            logging.info(f"Gemini vision failed: {e}")
-            return None
-
-    # Try chosen first, then fallback
-    if chosen == "openai":
-        result = _try_openai()
-        if result is not None:
-            return result
-        fallback = _try_gemini()
-        if fallback is not None:
-            return fallback
+            result = chosen_spec.call(image_path, context, resolved_model)
+            if result is not None:
+                logger.info(
+                    f"Vision response received from provider='{chosen.value}' model='{resolved_model}'"
+                )
+        except Exception as exc:  # noqa: broad-except - provider call may raise
+            logger.info(f"Vision provider '{chosen.value}' failed: {exc}")
     else:
-        result = _try_gemini()
-        if result is not None:
-            return result
-        fallback = _try_openai()
-        if fallback is not None:
-            return fallback
+        logger.info(
+            f"Vision provider '{chosen.value}' skipped because credentials are not configured."
+        )
+
+    if result is not None:
+        return result
+
+    for backup in VisionProvider:
+        if backup == chosen:
+            continue
+        backup_spec = PROVIDER_SPECS[backup.value]
+        if not backup_spec.has_credentials():
+            continue
+        fallback_model = DEFAULT_MODELS.get(backup, backup_spec.default_model)
+        logger.info(
+            f"Vision fallback to provider='{backup.value}' model='{fallback_model}'"
+        )
+        try:
+            fallback_result = backup_spec.call(image_path, context, fallback_model)
+            if fallback_result is not None:
+                logger.info(
+                    f"Vision response received from provider='{backup.value}' model='{fallback_model}'"
+                )
+                return fallback_result
+        except Exception as exc:  # noqa: broad-except - provider call may raise
+            logger.info(f"Vision provider '{backup.value}' failed: {exc}")
 
     raise RuntimeError(
-        "No working vision provider found. Ensure VISION_PROVIDER is set correctly and API keys are configured."
+        "No working vision provider found. Ensure provider configuration and API keys are set."
     )

@@ -1,16 +1,57 @@
 import os
 import tempfile
+from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from src.models.models import ResponseWithPageNum, TextElementWithPageNum
 from src.services.gpu_scheduler import scheduler
+from src.services.vision_service import (
+    AVAILABLE_MODEL_VALUES,
+    AVAILABLE_PROVIDER_VALUES,
+    VisionModel,
+    VisionProvider,
+)
 from src.utils.response_utils import json_response, pretty_response_flag
 
 router = APIRouter()
 
 # List of allowed file extensions
 ALLOWED_EXTENSIONS = [".pdf", ".png", ".jpeg", ".jpg"]
+
+
+def _form_provider(
+    provider: Optional[str] = Form(
+        None,
+        description="Vision model provider to use.",
+        json_schema_extra={"enum": AVAILABLE_PROVIDER_VALUES},
+    )
+) -> Optional[VisionProvider]:
+    if provider is None or provider.strip() == "":
+        return None
+    try:
+        return VisionProvider(provider.strip())
+    except ValueError:
+        allowed = ", ".join(p.value for p in VisionProvider)
+        raise HTTPException(
+            status_code=422, detail=f"Invalid provider '{provider}'. Allowed: {allowed}."
+        )
+
+
+def _form_model(
+    model: Optional[str] = Form(
+        None,
+        description="Vision model identifier to use.",
+        json_schema_extra={"enum": AVAILABLE_MODEL_VALUES},
+    )
+) -> Optional[VisionModel]:
+    if model is None or model.strip() == "":
+        return None
+    try:
+        return VisionModel(model.strip())
+    except ValueError:
+        allowed = ", ".join(m.value for m in VisionModel)
+        raise HTTPException(status_code=422, detail=f"Invalid model '{model}'. Allowed: {allowed}.")
 
 
 @router.post(
@@ -21,6 +62,8 @@ ALLOWED_EXTENSIONS = [".pdf", ".png", ".jpeg", ".jpg"]
 )
 async def mineru_with_images(
     file: UploadFile = File(...),
+    provider: Optional[VisionProvider] = Depends(_form_provider),
+    model: Optional[VisionModel] = Depends(_form_model),
     pretty: bool = Depends(pretty_response_flag),
 ):
     """
@@ -51,7 +94,12 @@ async def mineru_with_images(
 
     try:
         # Dispatch to GPU scheduler; this returns a Future
-        fut = scheduler.submit(tmp_path, pipeline="images")
+        fut = scheduler.submit(
+            tmp_path,
+            pipeline="images",
+            vision_provider=provider,
+            vision_model=model,
+        )
         payload = await _await_future(fut)
         result_payload = payload.get("result")
         if not isinstance(result_payload, list):
