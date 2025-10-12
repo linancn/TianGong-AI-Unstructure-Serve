@@ -10,6 +10,24 @@ from src.services.mineru_service_full import parse_doc
 from src.services.vision_service import vision_completion
 
 
+def _env_context_window() -> int:
+    raw_value = os.getenv("VISION_CONTEXT_WINDOW")
+    if raw_value is None:
+        return 2
+    try:
+        parsed = int(raw_value)
+        return max(parsed, 0)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid VISION_CONTEXT_WINDOW=%s, falling back to default (2).",
+            raw_value,
+        )
+        return 2
+
+
+CONTEXT_WINDOW = _env_context_window()
+
+
 def clean_text(text: str) -> str:
     """Clean text to remove surrogate characters and other problematic encodings."""
     if not text:
@@ -42,7 +60,7 @@ def table_text(item: Dict) -> str:
     return clean_text(text)
 
 
-def get_prev_context(context_elements: List[Dict], cur_idx: int, n: int = 2) -> str:
+def get_prev_context(context_elements: List[Dict], cur_idx: int, n: int) -> str:
     """获取前 n 个非空上下文块文本，倒序拼接。"""
     if cur_idx is None or cur_idx < 0 or not context_elements:
         return ""
@@ -57,7 +75,7 @@ def get_prev_context(context_elements: List[Dict], cur_idx: int, n: int = 2) -> 
     return "\n".join(res)
 
 
-def get_next_context(context_elements: List[Dict], cur_idx: int, n: int = 2) -> str:
+def get_next_context(context_elements: List[Dict], cur_idx: int, n: int) -> str:
     """获取后 n 个非空上下文块文本，正序拼接。"""
     if cur_idx is None or not context_elements:
         return ""
@@ -124,8 +142,8 @@ def _resolve_context_windows(
         return {"before": before_ctx, "after": after_ctx}
 
     if cur_idx is not None and 0 <= cur_idx < len(working_blocks):
-        before_ctx = get_prev_context(working_blocks, cur_idx, n=2)
-        after_ctx = get_next_context(working_blocks, cur_idx, n=2)
+        before_ctx = get_prev_context(working_blocks, cur_idx, n=CONTEXT_WINDOW)
+        after_ctx = get_next_context(working_blocks, cur_idx, n=CONTEXT_WINDOW)
         return {"before": before_ctx, "after": after_ctx}
 
     current_page = item.get("page_idx", -1)
@@ -138,10 +156,10 @@ def _resolve_context_windows(
             break
 
     if ref_idx is not None:
-        before_ctx = get_prev_context(working_blocks, ref_idx + 1, n=2)
-        after_ctx = get_next_context(working_blocks, ref_idx, n=2)
+        before_ctx = get_prev_context(working_blocks, ref_idx + 1, n=CONTEXT_WINDOW)
+        after_ctx = get_next_context(working_blocks, ref_idx, n=CONTEXT_WINDOW)
     else:
-        after_ctx = get_next_context(working_blocks, -1, n=2)
+        after_ctx = get_next_context(working_blocks, -1, n=CONTEXT_WINDOW)
     return {"before": before_ctx, "after": after_ctx}
 
 
