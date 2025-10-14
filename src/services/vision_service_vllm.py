@@ -6,7 +6,7 @@ from openai import OpenAI
 
 from src.config.config import VLLM_API_KEY, VLLM_BASE_URL
 
-DEFAULT_VISION_MODEL = "Qwen/Qwen2.5-VL-72B-Instruct-AWQ"
+DEFAULT_VISION_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct"
 _FALLBACK_API_KEY = "not-required"
 
 
