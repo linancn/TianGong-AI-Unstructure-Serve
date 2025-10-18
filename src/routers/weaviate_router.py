@@ -1,20 +1,61 @@
+import json
 import os
 import re
 import tempfile
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from typing import List, Optional
-import json
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from src.models.models import InsertSummary, ResponseWithPageNum, TextElementWithPageNum
 from src.services.gpu_scheduler import scheduler
-from src.services.weaviate_service import insert_text_chunks
 from src.services.docx_service import unstructure_docx
+from src.services.vision_service import (
+    AVAILABLE_MODEL_VALUES,
+    AVAILABLE_PROVIDER_VALUES,
+    VisionModel,
+    VisionProvider,
+)
+from src.services.weaviate_service import insert_text_chunks
 from src.utils.response_utils import json_response, pretty_response_flag
 
 router = APIRouter()
 
 # Weaviate collection/class 命名规则正则
 _WEAVIATE_CLASS_RE = re.compile(r"^[A-Z][_0-9A-Za-z]*$")
+
+
+def _form_provider(
+    provider: Optional[str] = Form(
+        None,
+        description="Vision model provider to use.",
+        json_schema_extra={"enum": AVAILABLE_PROVIDER_VALUES},
+    )
+) -> Optional[VisionProvider]:
+    if provider is None or provider.strip() == "":
+        return None
+    try:
+        return VisionProvider(provider.strip())
+    except ValueError:
+        allowed = ", ".join(p.value for p in VisionProvider)
+        raise HTTPException(
+            status_code=422, detail=f"Invalid provider '{provider}'. Allowed: {allowed}."
+        )
+
+
+def _form_model(
+    model: Optional[str] = Form(
+        None,
+        description="Vision model identifier to use.",
+        json_schema_extra={"enum": AVAILABLE_MODEL_VALUES},
+    )
+) -> Optional[VisionModel]:
+    if model is None or model.strip() == "":
+        return None
+    try:
+        return VisionModel(model.strip())
+    except ValueError:
+        allowed = ", ".join(m.value for m in VisionModel)
+        raise HTTPException(status_code=422, detail=f"Invalid model '{model}'. Allowed: {allowed}.")
 
 
 def build_weaviate_collection_name(base: str, user_id: str) -> str:
@@ -168,6 +209,8 @@ async def ingest_to_weaviate_with_images(
     collection_name: str = Form(...),
     user_id: str = Form(...),
     file: UploadFile = File(...),
+    provider: Optional[VisionProvider] = Depends(_form_provider),
+    model: Optional[VisionModel] = Depends(_form_model),
     tags: Optional[str] = Form(
         None, description="Optional tags as JSON array or comma-separated string"
     ),
@@ -178,6 +221,7 @@ async def ingest_to_weaviate_with_images(
     with image-aware extraction (figures/tables).
 
     - Supported types: .pdf
+    - provider/model: optionally override the MinerU vision backend
     - Collection name: sanitize and combine collection_name and user_id to a legal Weaviate class name
     - tags: JSON array or comma-separated string
     - source: original filename (with extension)
@@ -224,7 +268,12 @@ async def ingest_to_weaviate_with_images(
         tmp.close()
 
     try:
-        fut = scheduler.submit(tmp_path, pipeline="images")
+        fut = scheduler.submit(
+            tmp_path,
+            pipeline="images",
+            vision_provider=provider,
+            vision_model=model,
+        )
         payload = await _await_future(fut)
         items = [
             TextElementWithPageNum(text=it["text"], page_number=int(it["page_number"]))
