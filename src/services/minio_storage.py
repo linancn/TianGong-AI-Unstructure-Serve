@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import json
 from dataclasses import dataclass, field
-from typing import Generator, List, Optional, Sequence, Tuple
+from typing import Generator, Iterable, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
 import pypdfium2 as pdfium
@@ -24,6 +24,10 @@ class MinioStorageError(RuntimeError):
     """Raised when MinIO operations fail."""
 
 
+class MinioObjectNotFound(MinioStorageError):
+    """Raised when a requested MinIO object does not exist."""
+
+
 @dataclass
 class MinioAssetRecord:
     bucket: str
@@ -31,6 +35,14 @@ class MinioAssetRecord:
     json_object: str
     page_images: List[Tuple[int, str]] = field(default_factory=list)
     prefix: Optional[str] = None
+
+
+@dataclass
+class MinioObjectInfo:
+    object_name: str
+    size: Optional[int] = None
+    content_type: Optional[str] = None
+    etag: Optional[str] = None
 
 
 def parse_minio_endpoint(raw: str) -> Tuple[str, bool]:
@@ -192,3 +204,44 @@ def upload_pdf_bundle(
         page_images=page_objects,
         prefix=normalized_prefix or None,
     )
+
+
+def prepare_object_download(
+    client: Minio,
+    bucket: str,
+    object_name: str,
+    *,
+    chunk_size: int = 32 * 1024,
+) -> Tuple[Iterable[bytes], MinioObjectInfo]:
+    try:
+        stat = client.stat_object(bucket, object_name)
+    except S3Error as exc:
+        if exc.code in {"NoSuchKey", "NoSuchObject"}:
+            raise MinioObjectNotFound(f"Object '{object_name}' does not exist.") from exc
+        if exc.code == "NoSuchBucket":
+            raise MinioStorageError(f"Bucket '{bucket}' does not exist.") from exc
+        raise MinioStorageError(f"Failed to stat MinIO object '{object_name}': {exc}") from exc
+
+    try:
+        response = client.get_object(bucket, object_name)
+    except S3Error as exc:
+        if exc.code in {"NoSuchKey", "NoSuchObject"}:
+            raise MinioObjectNotFound(f"Object '{object_name}' does not exist.") from exc
+        raise MinioStorageError(f"Failed to fetch MinIO object '{object_name}': {exc}") from exc
+
+    def stream() -> Generator[bytes, None, None]:
+        try:
+            for chunk in response.stream(chunk_size):
+                if chunk:
+                    yield chunk
+        finally:
+            response.close()
+            response.release_conn()
+
+    info = MinioObjectInfo(
+        object_name=object_name,
+        size=getattr(stat, "size", None),
+        content_type=(stat.content_type or None),
+        etag=getattr(stat, "etag", None),
+    )
+    return stream(), info
