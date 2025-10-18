@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from pydantic import BaseModel
 
@@ -30,6 +30,19 @@ class ResponseWithoutPageNum(BaseModel):
         return cls(result=items)
 
 
+class MinioPageImage(BaseModel):
+    page_number: int
+    object_name: str
+
+
+class MinioAssetSummary(BaseModel):
+    bucket: str
+    prefix: Optional[str] = None
+    pdf_object: str
+    json_object: str
+    page_images: List[MinioPageImage]
+
+
 class InsertSummary(BaseModel):
     """Response model summarizing a Weaviate insertion."""
 
@@ -38,3 +51,4 @@ class InsertSummary(BaseModel):
     collection: str
     source: str
     has_page_numbers: bool
+    minio_assets: Optional[MinioAssetSummary] = None

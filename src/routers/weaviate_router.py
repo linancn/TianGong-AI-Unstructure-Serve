@@ -2,12 +2,27 @@ import json
 import os
 import re
 import tempfile
-from typing import List, Optional
+from typing import List, Optional, Sequence, Tuple
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
-from src.models.models import InsertSummary, ResponseWithPageNum, TextElementWithPageNum
+from src.models.models import (
+    InsertSummary,
+    MinioAssetSummary,
+    MinioPageImage,
+    ResponseWithPageNum,
+    TextElementWithPageNum,
+)
 from src.services.gpu_scheduler import scheduler
+from src.services.minio_storage import (
+    MinioConfig,
+    MinioStorageError,
+    clear_prefix,
+    upload_pdf_bundle,
+    create_client,
+    ensure_bucket,
+    parse_minio_endpoint,
+)
 from src.services.docx_service import unstructure_docx
 from src.services.vision_service import (
     AVAILABLE_MODEL_VALUES,
@@ -93,6 +108,114 @@ async def _await_future(fut):
     return await loop.run_in_executor(None, fut.result)
 
 
+MinioContext = Optional[Tuple[MinioConfig, object]]
+
+
+def _initialize_minio_context(
+    save_to_minio: bool,
+    address: Optional[str],
+    access_key: Optional[str],
+    secret_key: Optional[str],
+    bucket: Optional[str],
+) -> MinioContext:
+    if not save_to_minio:
+        return None
+
+    required = {
+        "minio_address": address,
+        "minio_access_key": access_key,
+        "minio_secret_key": secret_key,
+        "minio_bucket": bucket,
+    }
+    missing = [key for key, value in required.items() if not value or not value.strip()]
+    if missing:
+        joined = ", ".join(missing)
+        raise HTTPException(status_code=400, detail=f"Missing MinIO field(s): {joined}")
+
+    assert address is not None  # for type checker
+    assert access_key is not None
+    assert secret_key is not None
+    assert bucket is not None
+
+    try:
+        endpoint, secure = parse_minio_endpoint(address)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    cfg = MinioConfig(
+        endpoint=endpoint,
+        access_key=access_key.strip(),
+        secret_key=secret_key.strip(),
+        bucket=bucket.strip(),
+        secure=secure,
+    )
+
+    try:
+        client = create_client(cfg)
+        ensure_bucket(client, cfg.bucket)
+    except MinioStorageError as exc:
+        raise HTTPException(
+            status_code=400, detail=f"Failed to prepare MinIO bucket: {exc}"
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=400, detail=f"Failed to initialize MinIO client: {exc}"
+        ) from exc
+
+    return (cfg, client)
+
+
+def _build_minio_prefix(collection: str, filename: str) -> str:
+    base = os.path.splitext(os.path.basename(filename))[0]
+    base_clean = re.sub(r"[^0-9A-Za-z_-]+", "_", base).strip("_") or "document"
+    return f"{collection}/{base_clean}"
+
+
+def _upload_pdf_assets(
+    ctx: MinioContext,
+    collection: str,
+    filename: str,
+    pdf_path: str,
+    chunks_with_pages: Sequence[Tuple[str, int]],
+) -> MinioAssetSummary:
+    if ctx is None:
+        raise RuntimeError("MinIO context is required to upload assets.")
+    cfg, client = ctx
+    prefix = _build_minio_prefix(collection, filename)
+    try:
+        clear_prefix(client, cfg.bucket, prefix)
+    except MinioStorageError as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to clear existing MinIO objects: {exc}"
+        ) from exc
+    payload_for_json = [
+        {"text": text, "page_number": page_number} for text, page_number in chunks_with_pages
+    ]
+    try:
+        record = upload_pdf_bundle(
+            client,
+            cfg=cfg,
+            prefix=prefix,
+            pdf_path=pdf_path,
+            parsed_payload=payload_for_json,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500, detail=f"Failed to upload assets to MinIO: {exc}"
+        ) from exc
+
+    return MinioAssetSummary(
+        bucket=record.bucket,
+        prefix=record.prefix,
+        pdf_object=record.pdf_object,
+        json_object=record.json_object,
+        page_images=[
+            MinioPageImage(page_number=page, object_name=obj_name)
+            for page, obj_name in record.page_images
+        ],
+    )
+
+
 @router.post(
     "/weaviate/ingest",
     summary="Ingest parsed chunks into Weaviate (PDF via MinerU, DOCX via DOCX parser)",
@@ -106,6 +229,15 @@ async def ingest_to_weaviate(
     tags: Optional[str] = Form(
         None, description="Optional tags as JSON array or comma-separated string"
     ),
+    save_to_minio: bool = Form(
+        False, description="Store the PDF and parsed artifacts in MinIO alongside Weaviate."
+    ),
+    minio_address: Optional[str] = Form(
+        None, description="MinIO server address, e.g. https://minio.local:9000"
+    ),
+    minio_access_key: Optional[str] = Form(None, description="MinIO access key"),
+    minio_secret_key: Optional[str] = Form(None, description="MinIO secret key"),
+    minio_bucket: Optional[str] = Form(None, description="Target MinIO bucket name"),
     pretty: bool = Depends(pretty_response_flag),
 ):
     """
@@ -149,6 +281,21 @@ async def ingest_to_weaviate(
                 detail="Invalid tags format; supply JSON array or comma-separated list",
             )
 
+    minio_context: MinioContext = None
+    if save_to_minio:
+        if ext != ".pdf":
+            raise HTTPException(
+                status_code=400,
+                detail="MinIO storage is only supported for PDF uploads.",
+            )
+        minio_context = _initialize_minio_context(
+            save_to_minio,
+            minio_address,
+            minio_access_key,
+            minio_secret_key,
+            minio_bucket,
+        )
+
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
     try:
         tmp.write(await file.read())
@@ -158,6 +305,7 @@ async def ingest_to_weaviate(
         tmp.close()
 
     try:
+        minio_assets_summary: Optional[MinioAssetSummary] = None
         if ext == ".pdf":
             # PDF：使用 MinerU，得到 (text, page) 列表
             fut = scheduler.submit(tmp_path, pipeline="default")
@@ -177,6 +325,14 @@ async def ingest_to_weaviate(
                 source=filename,
                 tags=parsed_tags,
             )
+            if minio_context:
+                minio_assets_summary = _upload_pdf_assets(
+                    minio_context,
+                    safe_collection,
+                    filename,
+                    tmp_path,
+                    chunks_with_pages,
+                )
         else:
             # DOCX：使用 DOCX 解析服务，得到不带页码的文本列表
             chunks: List[str] = unstructure_docx(tmp_path)
@@ -186,6 +342,8 @@ async def ingest_to_weaviate(
                 source=filename,
                 tags=parsed_tags,
             )
+        if minio_assets_summary:
+            summary["minio_assets"] = minio_assets_summary.model_dump(mode="python")
         response_model = InsertSummary(**summary)
         return json_response(response_model, pretty)
     except HTTPException:
@@ -214,6 +372,15 @@ async def ingest_to_weaviate_with_images(
     tags: Optional[str] = Form(
         None, description="Optional tags as JSON array or comma-separated string"
     ),
+    save_to_minio: bool = Form(
+        False, description="Store the PDF and parsed artifacts in MinIO alongside Weaviate."
+    ),
+    minio_address: Optional[str] = Form(
+        None, description="MinIO server address, e.g. https://minio.local:9000"
+    ),
+    minio_access_key: Optional[str] = Form(None, description="MinIO access key"),
+    minio_secret_key: Optional[str] = Form(None, description="MinIO secret key"),
+    minio_bucket: Optional[str] = Form(None, description="Target MinIO bucket name"),
     pretty: bool = Depends(pretty_response_flag),
 ):
     """
@@ -259,6 +426,16 @@ async def ingest_to_weaviate_with_images(
                 detail="Invalid tags format; supply JSON array or comma-separated list",
             )
 
+    minio_context: MinioContext = None
+    if save_to_minio:
+        minio_context = _initialize_minio_context(
+            save_to_minio,
+            minio_address,
+            minio_access_key,
+            minio_secret_key,
+            minio_bucket,
+        )
+
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
     try:
         tmp.write(await file.read())
@@ -268,6 +445,7 @@ async def ingest_to_weaviate_with_images(
         tmp.close()
 
     try:
+        minio_assets_summary: Optional[MinioAssetSummary] = None
         fut = scheduler.submit(
             tmp_path,
             pipeline="images",
@@ -290,6 +468,16 @@ async def ingest_to_weaviate_with_images(
             source=filename,  # 使用完整文件名
             tags=parsed_tags,
         )
+        if minio_context:
+            minio_assets_summary = _upload_pdf_assets(
+                minio_context,
+                safe_collection,
+                filename,
+                tmp_path,
+                chunks_with_pages,
+            )
+        if minio_assets_summary:
+            summary["minio_assets"] = minio_assets_summary.model_dump(mode="python")
         response_model = InsertSummary(**summary)
         return json_response(response_model, pretty)
     except HTTPException:

@@ -37,3 +37,6 @@ pdf2image
 tenacity
 torch
 protobuf
+
+#minio # (Uncomment if MinIO support is needed)
+minio
