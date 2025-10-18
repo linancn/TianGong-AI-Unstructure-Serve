@@ -123,3 +123,12 @@ else
 fi
 
 ```
+
+# Kroki Server
+```bash
+docker run -d -p 7999:8000 yuzutech/kroki
+```
+# Quickchart Server
+```bash
+docker run -d -p 7998:3400 ianw/quickchart
+```

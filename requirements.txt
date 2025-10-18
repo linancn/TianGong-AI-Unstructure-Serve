@@ -17,6 +17,7 @@ py-zerox
 # Document Processing
 unstructured[docx,pptx]
 python-pptx
+python-docx
 pillow
 
 # Data Processing
