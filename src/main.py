@@ -17,6 +17,7 @@ from src.routers import (
     mineru_router,
     mineru_sci_router,
     mineru_with_images_router,
+    minio_router,
     weaviate_router,
     gpu_router,
 )
@@ -68,5 +69,6 @@ app.include_router(ppt_router.router)
 app.include_router(mineru_router.router)
 app.include_router(mineru_sci_router.router)
 app.include_router(mineru_with_images_router.router)
+app.include_router(minio_router.router)
 app.include_router(weaviate_router.router)
 app.include_router(gpu_router.router)

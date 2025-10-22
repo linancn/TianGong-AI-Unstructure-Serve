@@ -1,13 +1,10 @@
 import json
-import mimetypes
 import os
 import re
 import tempfile
 from typing import List, Optional, Sequence, Tuple
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
-
 from src.models.models import (
     InsertSummary,
     MinioAssetSummary,
@@ -19,13 +16,11 @@ from src.services.gpu_scheduler import scheduler
 from src.services.minio_storage import (
     MinioConfig,
     MinioStorageError,
-    MinioObjectNotFound,
     clear_prefix,
     upload_pdf_bundle,
     create_client,
     ensure_bucket,
     parse_minio_endpoint,
-    prepare_object_download,
 )
 from src.services.docx_service import unstructure_docx
 from src.services.vision_service import (
@@ -493,75 +488,6 @@ async def ingest_to_weaviate_with_images(
             os.unlink(tmp_path)
         except Exception:
             pass
-
-
-@router.post(
-    "/minio/download",
-    summary="Download a stored file from MinIO",
-    response_description="Binary stream of the requested object",
-)
-async def download_minio_file(
-    collection_name: str = Form(...),
-    user_id: str = Form(...),
-    minio_address: str = Form(
-        ..., description="MinIO server address, e.g. https://minio.local:9000"
-    ),
-    minio_access_key: str = Form(..., description="MinIO access key"),
-    minio_secret_key: str = Form(..., description="MinIO secret key"),
-    minio_bucket: str = Form(..., description="Target MinIO bucket name"),
-    object_path: str = Form(
-        ..., description="Path of the object to download (relative to the collection)"
-    ),
-):
-    try:
-        safe_collection = build_weaviate_collection_name(collection_name, user_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    normalized_path = object_path.strip()
-    if not normalized_path:
-        raise HTTPException(status_code=400, detail="object_path must not be empty.")
-    normalized_path = normalized_path.lstrip("/")
-    if normalized_path.startswith(f"{safe_collection}/"):
-        object_name = normalized_path
-    else:
-        object_name = f"{safe_collection}/{normalized_path}"
-
-    minio_context = _initialize_minio_context(
-        True,
-        minio_address,
-        minio_access_key,
-        minio_secret_key,
-        minio_bucket,
-    )
-    if minio_context is None:
-        raise HTTPException(status_code=500, detail="Failed to initialize MinIO context.")
-
-    cfg, client = minio_context
-    try:
-        stream, info = prepare_object_download(client, cfg.bucket, object_name)
-    except MinioObjectNotFound as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except MinioStorageError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=500, detail=f"Failed to download MinIO object: {exc}"
-        ) from exc
-
-    filename = os.path.basename(info.object_name) or "download.bin"
-    media_type = (
-        info.content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
-    )
-    headers = {
-        "Content-Disposition": f'attachment; filename="{filename}"',
-    }
-    if info.size is not None:
-        headers["Content-Length"] = str(info.size)
-    if info.etag:
-        headers["ETag"] = info.etag
-
-    return StreamingResponse(stream, media_type=media_type, headers=headers)
 
 
 # 已移除 /weaviate/ingest_docx 入口，统一由 /weaviate/ingest 处理 .pdf 与 .docx
