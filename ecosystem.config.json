@@ -18,7 +18,8 @@
         "VISION_PROVIDER": "gemini",
         "VISION_MODEL": "gemini-2.5-flash",
         "VISION_CONTEXT_WINDOW": "4",
-        "OCR_AGENT": "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle"
+        "OCR_AGENT": "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle",
+        "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30000"
       },
       "out_file": "gunicorn.log",
       "error_file": "gunicorn.log",

@@ -18,7 +18,8 @@
         "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
         "VISION_MODEL": "gemini-2.5-flash",
         "VISION_CONTEXT_WINDOW": "4",
-        "OCR_AGENT": "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle"
+        "OCR_AGENT": "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle",
+        "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30000"
       },
       "out_file": "gunicorn-0.log",
       "error_file": "gunicorn-0.log",
@@ -42,7 +43,8 @@
         "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
         "VISION_MODEL": "gemini-2.5-flash",
         "VISION_CONTEXT_WINDOW": "4",
-        "OCR_AGENT": "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle"
+        "OCR_AGENT": "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle",
+        "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30001"
       },
       "out_file": "gunicorn-1.log",
       "error_file": "gunicorn-1.log",
@@ -66,7 +68,8 @@
         "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
         "VISION_MODEL": "gemini-2.5-flash",
         "VISION_CONTEXT_WINDOW": "4",
-        "OCR_AGENT": "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle"
+        "OCR_AGENT": "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle",
+        "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30002"
       },
       "out_file": "gunicorn-2.log",
       "error_file": "gunicorn-2.log",
@@ -90,7 +93,8 @@
         "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
         "VISION_MODEL": "gemini-2.5-flash",
         "VISION_CONTEXT_WINDOW": "4",
-        "OCR_AGENT": "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle"
+        "OCR_AGENT": "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle",
+        "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30003"
       },
       "out_file": "gunicorn-3.log",
       "error_file": "gunicorn-3.log",
