@@ -198,4 +198,3 @@ async def upload_minio_file(
         "size": len(data),
         "content_type": content_type,
     }
-
