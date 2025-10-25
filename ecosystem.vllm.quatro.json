@@ -1,0 +1,52 @@
+{
+  "apps": [
+    {
+      "name": "mineru-vllm-server-0",
+      "cwd": "/home/david/projects/TianGong-AI-Unstructure-Serve",
+      "script": ".venv/bin/mineru-vllm-server",
+      "args": "--port 30000",
+      "exec_mode": "fork",
+      "interpreter": "none",
+      "env": {
+        "MINERU_MODEL_SOURCE": "modelscope",
+        "CUDA_VISIBLE_DEVICES": "0"
+      }
+    },
+    {
+      "name": "mineru-vllm-server-1",
+      "cwd": "/home/david/projects/TianGong-AI-Unstructure-Serve",
+      "script": ".venv/bin/mineru-vllm-server",
+      "args": "--port 30001",
+      "exec_mode": "fork",
+      "interpreter": "none",
+      "env": {
+        "MINERU_MODEL_SOURCE": "modelscope",
+        "CUDA_VISIBLE_DEVICES": "1"
+      }
+    },
+    {
+      "name": "mineru-vllm-server-2",
+      "cwd": "/home/david/projects/TianGong-AI-Unstructure-Serve",
+      "script": ".venv/bin/mineru-vllm-server",
+      "args": "--port 30002",
+      "exec_mode": "fork",
+      "interpreter": "none",
+      "env": {
+        "MINERU_MODEL_SOURCE": "modelscope",
+        "CUDA_VISIBLE_DEVICES": "2"
+      }
+    },
+    {
+      "name": "mineru-vllm-server-3",
+      "cwd": "/home/david/projects/TianGong-AI-Unstructure-Serve",
+      "script": ".venv/bin/mineru-vllm-server",
+      "args": "--port 30003",
+      "exec_mode": "fork",
+      "interpreter": "none",
+      "env": {
+        "MINERU_MODEL_SOURCE": "modelscope",
+        "CUDA_VISIBLE_DEVICES": "3"
+      }
+    }
+  ]
+}

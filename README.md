@@ -81,9 +81,9 @@ nohup env MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=2 TABLE_OCR=paddle
 npm i -g pm2
 
 pm2 start ecosystem.vllm.config.json
-
 pm2 start ecosystem.config.json
 
+pm2 start ecosystem.vllm.quatro.json
 pm2 start ecosystem.quatro.json
 
 pm2 restart all
@@ -137,5 +137,6 @@ docker run -d -p 7998:3400 ianw/quickchart
 
 # MinerU vLLM Server
 ```bash
+# Run first time to download models
 MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=0 mineru-vllm-server --port 30000
 ```
