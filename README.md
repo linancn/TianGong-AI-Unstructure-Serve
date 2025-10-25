@@ -132,3 +132,8 @@ docker run -d -p 7999:8000 yuzutech/kroki
 ```bash
 docker run -d -p 7998:3400 ianw/quickchart
 ```
+
+# MinerU vLLM Server
+```bash
+mineru-vllm-server --port 30000
+```

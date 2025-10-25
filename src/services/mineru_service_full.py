@@ -199,9 +199,9 @@ def parse_doc(
     path_list: list[Path],
     output_dir,
     lang="ch",
-    backend="pipeline",
+    backend="vlm-http-client",
     method="auto",
-    server_url=None,
+    server_url="http://127.0.0.1:30000",
     start_page_id=0,  # Start page ID for parsing, default is 0
     end_page_id=None,  # End page ID for parsing, default is None (parse all pages until the end of the document)
 ):
@@ -273,5 +273,5 @@ if __name__ == "__main__":
 
     """To enable VLM mode, change the backend to 'vlm-xxx'"""
     # parse_doc(doc_path_list, output_dir, backend="vlm-transformers")  # more general.
-    # parse_doc(doc_path_list, output_dir, backend="vlm-sglang-engine")  # faster(engine).
-    # parse_doc(doc_path_list, output_dir, backend="vlm-sglang-client", server_url="http://127.0.0.1:30000"）  # faster(client).
+    # parse_doc(doc_path_list, output_dir, backend="vlm-vllm-engine")  # faster(engine).
+    # parse_doc(doc_path_list, output_dir, backend="vlm-http-client", server_url="http://127.0.0.1:30000")  # faster(client).
