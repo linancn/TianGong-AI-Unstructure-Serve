@@ -9,7 +9,8 @@
       "interpreter": "none",
       "env": {
         "MINERU_MODEL_SOURCE": "modelscope",
-        "CUDA_VISIBLE_DEVICES": "0"
+        "CUDA_VISIBLE_DEVICES": "0",
+        "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30000"
       }
     },
     {
@@ -21,7 +22,8 @@
       "interpreter": "none",
       "env": {
         "MINERU_MODEL_SOURCE": "modelscope",
-        "CUDA_VISIBLE_DEVICES": "1"
+        "CUDA_VISIBLE_DEVICES": "1",
+        "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30001"
       }
     },
     {
@@ -33,7 +35,8 @@
       "interpreter": "none",
       "env": {
         "MINERU_MODEL_SOURCE": "modelscope",
-        "CUDA_VISIBLE_DEVICES": "2"
+        "CUDA_VISIBLE_DEVICES": "2",
+        "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30002"
       }
     },
     {
@@ -45,7 +48,8 @@
       "interpreter": "none",
       "env": {
         "MINERU_MODEL_SOURCE": "modelscope",
-        "CUDA_VISIBLE_DEVICES": "3"
+        "CUDA_VISIBLE_DEVICES": "3",
+        "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30003"
       }
     }
   ]

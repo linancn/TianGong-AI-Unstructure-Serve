@@ -2,7 +2,9 @@
 import copy
 import json
 import os
+from itertools import cycle
 from pathlib import Path
+from threading import Lock
 
 from loguru import logger
 
@@ -18,6 +20,86 @@ from mineru.backend.pipeline.model_json_to_middle_json import (
 )
 from mineru.backend.vlm.vlm_middle_json_mkcontent import union_make as vlm_union_make
 from mineru.utils.models_download_utils import auto_download_and_get_model_root_path
+
+
+DEFAULT_VLLM_SERVER_URL = "http://127.0.0.1:30000"
+_SERVER_URL_ENV_KEYS: tuple[str, ...] = (
+    "MINERU_VLLM_SERVER_URLS",
+    "MINERU_VLLM_SERVER_URL",
+    "MINERU_VLM_SERVER_URLS",
+    "MINERU_VLM_SERVER_URL",
+)
+_SERVER_URL_CYCLE_LOCK = Lock()
+_SERVER_URL_CACHE: tuple[str, ...] = ()
+_SERVER_URL_CYCLE = None
+
+
+def _normalize_server_url_input(raw_value) -> list[str]:
+    """Accept strings, comma-separated strings, JSON arrays, or iterables."""
+    if raw_value is None:
+        return []
+
+    if isinstance(raw_value, (list, tuple, set)):
+        normalized: list[str] = []
+        for item in raw_value:
+            normalized.extend(_normalize_server_url_input(item))
+        return normalized
+
+    if isinstance(raw_value, str):
+        candidate = raw_value.strip()
+        if not candidate:
+            return []
+        if candidate.startswith("[") and candidate.endswith("]"):
+            try:
+                parsed = json.loads(candidate)
+            except json.JSONDecodeError:
+                pass
+            else:
+                return _normalize_server_url_input(parsed)
+        if "," in candidate:
+            return [part.strip() for part in candidate.split(",") if part.strip()]
+        return [candidate]
+
+    return _normalize_server_url_input(str(raw_value))
+
+
+def _server_urls_from_env() -> list[str]:
+    for key in _SERVER_URL_ENV_KEYS:
+        raw_value = os.getenv(key)
+        if not raw_value:
+            continue
+        urls = _normalize_server_url_input(raw_value)
+        if urls:
+            return urls
+    return []
+
+
+def _resolve_server_urls(server_url) -> list[str]:
+    explicit_urls = _normalize_server_url_input(server_url)
+    if explicit_urls:
+        return explicit_urls
+
+    env_urls = _server_urls_from_env()
+    if env_urls:
+        return env_urls
+
+    return [DEFAULT_VLLM_SERVER_URL]
+
+
+def _next_server_url(urls: list[str]) -> str:
+    if not urls:
+        raise ValueError("No VLM server URLs available.")
+    if len(urls) == 1:
+        return urls[0]
+
+    global _SERVER_URL_CYCLE, _SERVER_URL_CACHE
+    urls_tuple = tuple(urls)
+    with _SERVER_URL_CYCLE_LOCK:
+        if _SERVER_URL_CYCLE is None or _SERVER_URL_CACHE != urls_tuple:
+            _SERVER_URL_CYCLE = cycle(urls_tuple)
+            _SERVER_URL_CACHE = urls_tuple
+            logger.debug("Configured VLM server pool: %s", urls_tuple)
+        return next(_SERVER_URL_CYCLE)
 
 
 def do_parse(
@@ -129,6 +211,8 @@ def do_parse(
 
         f_draw_span_bbox = False
         parse_method = "vlm"
+        server_urls = _resolve_server_urls(server_url)
+        assigned_urls = [_next_server_url(server_urls) for _ in range(len(pdf_bytes_list))]
         for idx, pdf_bytes in enumerate(pdf_bytes_list):
             pdf_file_name = pdf_file_names[idx]
             pdf_bytes = convert_pdf_bytes_to_bytes_by_pypdfium2(
@@ -138,8 +222,14 @@ def do_parse(
             image_writer, md_writer = FileBasedDataWriter(local_image_dir), FileBasedDataWriter(
                 local_md_dir
             )
+            logger.debug(
+                "Dispatching %s to backend '%s' via %s", pdf_file_name, backend, assigned_urls[idx]
+            )
             middle_json, infer_result = vlm_doc_analyze(
-                pdf_bytes, image_writer=image_writer, backend=backend, server_url=server_url
+                pdf_bytes,
+                image_writer=image_writer,
+                backend=backend,
+                server_url=assigned_urls[idx],
             )
 
             pdf_info = middle_json["pdf_info"]
@@ -201,7 +291,7 @@ def parse_doc(
     lang="ch",
     backend="vlm-http-client",
     method="auto",
-    server_url="http://127.0.0.1:30000",
+    server_url=None,
     start_page_id=0,  # Start page ID for parsing, default is 0
     end_page_id=None,  # End page ID for parsing, default is None (parse all pages until the end of the document)
 ):
@@ -224,7 +314,10 @@ def parse_doc(
         ocr: Use OCR method for image-based PDFs.
         Without method specified, 'auto' will be used by default.
         Adapted only for the case where the backend is set to "pipeline".
-    server_url: When the backend is `sglang-client`, you need to specify the server_url, for example:`http://127.0.0.1:30000`
+    server_url: A single URL, an iterable of URLs, or a comma/JSON-separated string pointing to VLM servers.
+        When omitted, the service checks the environment variables
+        MINERU_VLLM_SERVER_URLS / MINERU_VLM_SERVER_URLS (and singular forms) before
+        falling back to http://127.0.0.1:30000.
     """
     try:
         file_name_list = []
@@ -274,4 +367,9 @@ if __name__ == "__main__":
     """To enable VLM mode, change the backend to 'vlm-xxx'"""
     # parse_doc(doc_path_list, output_dir, backend="vlm-transformers")  # more general.
     # parse_doc(doc_path_list, output_dir, backend="vlm-vllm-engine")  # faster(engine).
-    # parse_doc(doc_path_list, output_dir, backend="vlm-http-client", server_url="http://127.0.0.1:30000")  # faster(client).
+    # parse_doc(
+    #     doc_path_list,
+    #     output_dir,
+    #     backend="vlm-http-client",
+    #     server_url=["http://127.0.0.1:30000", "http://127.0.0.1:30001"],
+    # )  # faster(client) with multi-backend round robin.
