@@ -64,6 +64,13 @@ def table_text(item: Dict) -> str:
     return clean_text(text)
 
 
+def list_text(item: Dict) -> str:
+    items = item.get("list_items") or []
+    if items:
+        return clean_text("\n".join(items))
+    return clean_text(item.get("text", ""))
+
+
 def get_prev_context(context_elements: List[Dict], cur_idx: int, n: int) -> str:
     """获取前 n 个非空上下文块文本，倒序拼接。"""
     if cur_idx is None or cur_idx < 0 or not context_elements:
@@ -103,6 +110,15 @@ def _build_context_blocks(content_list: List[Dict]) -> List[Dict]:
                 block = {
                     "type": item["type"],
                     "text": clean_text(item["text"]),
+                    "page_idx": item.get("page_idx", -1),
+                    "orig_item": item,
+                }
+        elif item["type"] == "list":
+            list_txt = list_text(item)
+            if list_txt.strip():
+                block = {
+                    "type": "list",
+                    "text": list_txt,
                     "page_idx": item.get("page_idx", -1),
                     "orig_item": item,
                 }
@@ -282,6 +298,11 @@ def parse_with_images(
                     img_txt = image_text(item)
                     if img_txt.strip():
                         result_items.append({"text": img_txt, "page_number": page_number})
+
+            elif item["type"] == "list":
+                list_txt = list_text(item)
+                if list_txt.strip():
+                    result_items.append({"text": list_txt, "page_number": page_number})
 
             elif item["type"] in ("text", "equation") and item.get("text", "").strip():
                 result_items.append({"text": clean_text(item["text"]), "page_number": page_number})

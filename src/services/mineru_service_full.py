@@ -1,10 +1,12 @@
 # Copyright (c) Opendatalab. All rights reserved.
+import base64
 import copy
 import json
 import os
 from itertools import cycle
 from pathlib import Path
 from threading import Lock
+from typing import Any, Optional
 
 from loguru import logger
 
@@ -102,6 +104,66 @@ def _next_server_url(urls: list[str]) -> str:
         return next(_SERVER_URL_CYCLE)
 
 
+def _debug_default_serializer(obj: Any):
+    if isinstance(obj, (bytes, bytearray)):
+        try:
+            return obj.decode("utf-8")
+        except UnicodeDecodeError:
+            return {
+                "__type__": "bytes",
+                "base64": base64.b64encode(obj).decode("ascii"),
+            }
+    if isinstance(obj, Path):
+        return str(obj)
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    if hasattr(obj, "dict"):
+        return obj.dict()
+    if hasattr(obj, "__dict__") and obj.__dict__:
+        return {key: value for key, value in obj.__dict__.items() if not key.startswith("_")}
+    return repr(obj)
+
+
+def _serialize_debug_payload(payload: dict[str, Any]) -> str:
+    try:
+        return json.dumps(
+            payload,
+            ensure_ascii=False,
+            indent=4,
+            default=_debug_default_serializer,
+        )
+    except Exception as exc:
+        raise ValueError("Failed to serialize debug payload") from exc
+
+
+def _output_debug_payload(
+    writer: Optional[FileBasedDataWriter],
+    filename: str,
+    payload: dict[str, Any],
+    *,
+    dump: bool,
+    log: bool,
+) -> None:
+    if not dump and not log:
+        return
+
+    try:
+        serialized = _serialize_debug_payload(payload)
+    except ValueError:
+        logger.exception("Failed to prepare debug payload for %s", filename)
+        return
+
+    if dump and writer is not None:
+        try:
+            writer.write_string(filename, serialized)
+        except Exception:
+            logger.exception("Failed to dump debug payload for %s", filename)
+
+    if log:
+        logger.info("Intermediate payload for %s:\n%s", filename, serialized)
+        print(f"[mineru-debug] {filename} ->\n{serialized}", flush=True)
+
+
 def do_parse(
     output_dir,  # Output directory for storing parsing results
     pdf_file_names: list[str],  # List of PDF file names to be parsed
@@ -117,6 +179,8 @@ def do_parse(
     f_dump_md=False,  # Whether to dump markdown files
     f_dump_middle_json=False,  # Whether to dump middle JSON files
     f_dump_model_output=False,  # Whether to dump model output files
+    f_dump_debug_intermediate=False,  # Whether to dump intermediate debug payloads
+    f_log_debug_intermediate=False,  # Whether to log intermediate debug payloads
     f_dump_orig_pdf=False,  # Whether to dump original PDF files
     f_dump_content_list=False,  # Whether to dump content list files
     f_make_md_mode=MakeMode.MM_MD,  # The mode for making markdown content, default is MM_MD
@@ -124,6 +188,9 @@ def do_parse(
     end_page_id=None,  # End page ID for parsing, default is None (parse all pages until the end of the document)
     return_content_list=True,  # Whether to return content lists
 ):  # Store all content lists if returning them
+
+    last_content_list = None
+    last_local_md_dir = None
 
     if backend == "pipeline":
         for idx, pdf_bytes in enumerate(pdf_bytes_list):
@@ -149,6 +216,7 @@ def do_parse(
             image_writer, md_writer = FileBasedDataWriter(local_image_dir), FileBasedDataWriter(
                 local_md_dir
             )
+            last_local_md_dir = local_md_dir
 
             images_list = all_image_lists[idx]
             pdf_doc = all_pdf_docs[idx]
@@ -182,9 +250,11 @@ def do_parse(
                 )
 
             # Generate content list if needed for saving or returning
+            content_list = None
             if f_dump_content_list or return_content_list:
                 image_dir = str(os.path.basename(local_image_dir))
                 content_list = pipeline_union_make(pdf_info, MakeMode.CONTENT_LIST, image_dir)
+                last_content_list = content_list
 
                 if f_dump_content_list:
                     md_writer.write_string(
@@ -202,6 +272,25 @@ def do_parse(
                 md_writer.write_string(
                     f"{pdf_file_name}_model.json",
                     json.dumps(model_json, ensure_ascii=False, indent=4),
+                )
+
+            if f_dump_debug_intermediate or f_log_debug_intermediate:
+                debug_payload = {
+                    "pdf_file_name": pdf_file_name,
+                    "backend": "pipeline",
+                    "parse_method": parse_method,
+                    "lang": _lang,
+                    "ocr_enabled": _ocr_enable,
+                    "model_output": model_json,
+                    "middle_json": middle_json,
+                    "content_list": content_list,
+                }
+                _output_debug_payload(
+                    md_writer,
+                    f"{pdf_file_name}_debug.json",
+                    debug_payload,
+                    dump=f_dump_debug_intermediate,
+                    log=f_log_debug_intermediate,
                 )
 
             logger.info(f"local output dir is {local_md_dir}")
@@ -222,6 +311,7 @@ def do_parse(
             image_writer, md_writer = FileBasedDataWriter(local_image_dir), FileBasedDataWriter(
                 local_md_dir
             )
+            last_local_md_dir = local_md_dir
             logger.debug(
                 "Dispatching %s to backend '%s' via %s", pdf_file_name, backend, assigned_urls[idx]
             )
@@ -255,9 +345,11 @@ def do_parse(
                 )
 
             # Generate content list if needed for saving or returning
+            content_list = None
             if f_dump_content_list or return_content_list:
                 image_dir = str(os.path.basename(local_image_dir))
                 content_list = vlm_union_make(pdf_info, MakeMode.CONTENT_LIST, image_dir)
+                last_content_list = content_list
 
                 if f_dump_content_list:
                     md_writer.write_string(
@@ -278,11 +370,29 @@ def do_parse(
                     model_output,
                 )
 
+            if f_dump_debug_intermediate or f_log_debug_intermediate:
+                debug_payload = {
+                    "pdf_file_name": pdf_file_name,
+                    "backend": f"vlm-{backend}",
+                    "server_url": assigned_urls[idx],
+                    "parse_method": parse_method,
+                    "infer_result": infer_result,
+                    "middle_json": middle_json,
+                    "content_list": content_list,
+                }
+                _output_debug_payload(
+                    md_writer,
+                    f"{pdf_file_name}_debug.json",
+                    debug_payload,
+                    dump=f_dump_debug_intermediate,
+                    log=f_log_debug_intermediate,
+                )
+
             logger.info(f"local output dir is {local_md_dir}")
 
     # Return content lists if requested
     if return_content_list:
-        return content_list, local_md_dir
+        return last_content_list, last_local_md_dir
 
 
 def parse_doc(
@@ -294,6 +404,8 @@ def parse_doc(
     server_url=None,
     start_page_id=0,  # Start page ID for parsing, default is 0
     end_page_id=None,  # End page ID for parsing, default is None (parse all pages until the end of the document)
+    dump_debug_intermediate=False,  # Dump intermediate payloads for debugging
+    log_debug_intermediate=False,  # Log intermediate payloads for debugging
 ):
     """
     Parameter description:
@@ -318,6 +430,8 @@ def parse_doc(
         When omitted, the service checks the environment variables
         MINERU_VLLM_SERVER_URLS / MINERU_VLM_SERVER_URLS (and singular forms) before
         falling back to http://127.0.0.1:30000.
+    dump_debug_intermediate: When True, writes out intermediate parsing payloads for debugging.
+    log_debug_intermediate: When True, logs intermediate parsing payloads for debugging.
     """
     try:
         file_name_list = []
@@ -339,6 +453,8 @@ def parse_doc(
             server_url=server_url,
             start_page_id=start_page_id,
             end_page_id=end_page_id,
+            f_dump_debug_intermediate=dump_debug_intermediate,
+            f_log_debug_intermediate=log_debug_intermediate,
         )
         return response
     except Exception as e:

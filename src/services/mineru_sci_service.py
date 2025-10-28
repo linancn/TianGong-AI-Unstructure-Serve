@@ -40,6 +40,15 @@ def table_text(item):
     return clean_text(combined_text)
 
 
+def list_text(item):
+    list_items = item.get("list_items") or []
+    if list_items:
+        combined_text = "\n".join(list_items)
+    else:
+        combined_text = item.get("text", "")
+    return clean_text(combined_text)
+
+
 filter_patterns = [
     r"^\s*([ivxlcdm]+\.?|\d+\.?|\w+\.?)?\s*acknowledgements?\s*[:\.]?\s*$",
     r"^\s*([ivxlcdm]+\.?|\d+\.?|\w+\.?)?\s*acknowledgments?\s*[:\.]?\s*$",
@@ -101,6 +110,8 @@ def mineru_service(file_path):
                     text=(
                         clean_text(item["text"])
                         if item["type"] in ("text", "equation")
+                        else list_text(item)
+                        if item["type"] == "list"
                         else table_text(item) if item["type"] == "table" else image_text(item)
                     ),
                     page_number=item["page_idx"] + 1,
@@ -108,6 +119,13 @@ def mineru_service(file_path):
                 for item in content_list_content
                 if (
                     (item["type"] in ("text", "equation") and item.get("text", "").strip())
+                    or (
+                        item["type"] == "list"
+                        and (
+                            any(text.strip() for text in item.get("list_items", []))
+                            or item.get("text", "").strip()
+                        )
+                    )
                     or (
                         item["type"] == "image"
                         and (item.get("img_caption") or item.get("img_footnote"))

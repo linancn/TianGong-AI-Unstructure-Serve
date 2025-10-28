@@ -44,6 +44,15 @@ def _table_text(item: dict) -> str:
     return _clean_text(combined_text)
 
 
+def _list_text(item: dict) -> str:
+    list_items = item.get("list_items") or []
+    if list_items:
+        combined_text = "\n".join(list_items)
+    else:
+        combined_text = item.get("text", "")
+    return _clean_text(combined_text)
+
+
 def _actual_parse(
     file_path: str, pipeline: str, options: Optional[Dict[str, object]] = None
 ) -> List[Dict[str, int]]:
@@ -65,6 +74,11 @@ def _actual_parse(
             itype = item.get("type")
             if itype in ("text", "equation") and (item.get("text", "").strip()):
                 text = _clean_text(item["text"])  # type: ignore[index]
+            elif itype == "list" and (
+                any(text.strip() for text in item.get("list_items", []))
+                or item.get("text", "").strip()
+            ):
+                text = _list_text(item)
             elif itype == "image" and (item.get("img_caption") or item.get("img_footnote")):
                 text = _image_text(item)
             elif itype == "table" and (
