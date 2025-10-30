@@ -16,6 +16,7 @@
                 "src",
                 "--reload-exclude",
                 "weaviate/**",
+                "minio/**",
                 "--host",
                 "0.0.0.0",
                 "--port",

@@ -128,11 +128,25 @@ fi
 
 # Kroki Server
 ```bash
-docker run -d -p 7999:8000 yuzutech/kroki
+docker run -d -p --restart unless-stopped 7999:8000 yuzutech/kroki
 ```
 # Quickchart Server
 ```bash
-docker run -d -p 7998:3400 ianw/quickchart
+docker run -d -p --restart unless-stopped 7998:3400 ianw/quickchart
+```
+
+# MinIO Server
+```bash
+docker run -d \
+  -p 9000:9000 \
+  -p 9001:9001 \
+  --name minio \
+  -e MINIO_ROOT_USER=minioadmin \
+  -e MINIO_ROOT_PASSWORD=1234_qwer \
+  --restart unless-stopped \
+  -v "$(pwd)/minio/data:/data" \
+  quay.io/minio/minio server /data --console-address ":9001"
+
 ```
 
 # MinerU vLLM Server
