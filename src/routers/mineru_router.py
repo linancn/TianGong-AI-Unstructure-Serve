@@ -21,6 +21,7 @@ ALLOWED_EXTENSIONS = [".pdf", ".png", ".jpeg", ".jpg"]
 async def mineru(
     file: UploadFile = File(...),
     pretty: bool = Depends(pretty_response_flag),
+    chunk_type: bool = False,
 ):
     """
     Use MinerU to parse a document and return text chunks with page numbers.
@@ -50,11 +51,15 @@ async def mineru(
 
     try:
         # Dispatch to GPU scheduler; this returns a Future
-        fut = scheduler.submit(tmp_path)
+        fut = scheduler.submit(tmp_path, chunk_type=chunk_type)
         payload = await _await_future(fut)
         # Map back into Pydantic model
         items = [
-            TextElementWithPageNum(text=it["text"], page_number=int(it["page_number"]))
+            TextElementWithPageNum(
+                text=it["text"],
+                page_number=int(it["page_number"]),
+                type=it.get("type") if chunk_type else None,
+            )
             for it in payload.get("result", [])
         ]
         response_model = ResponseWithPageNum(result=items)

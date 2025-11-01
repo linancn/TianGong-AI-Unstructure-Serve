@@ -55,13 +55,14 @@ def _list_text(item: dict) -> str:
 
 def _actual_parse(
     file_path: str, pipeline: str, options: Optional[Dict[str, object]] = None
-) -> List[Dict[str, int]]:
+) -> List[Dict[str, object]]:
     """Inner heavy parse logic (run inside an isolated subprocess watchdog)."""
-    options = options or {}
+    options = dict(options or {})
+    chunk_type = bool(options.pop("chunk_type", False))
     if pipeline == "images":
         from src.services.mineru_with_images_service import parse_with_images
 
-        return parse_with_images(file_path, **options)
+        return parse_with_images(file_path, chunk_type=chunk_type, **options)
     if pipeline == "sci":
         from src.services.mineru_sci_service import parse_doc
     else:  # default
@@ -69,11 +70,15 @@ def _actual_parse(
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         content_list_content, _ = parse_doc([file_path], tmp_dir)
-        results: List[Dict[str, int]] = []
+        results: List[Dict[str, object]] = []
         for item in content_list_content:
             itype = item.get("type")
-            if itype in ("text", "equation") and (item.get("text", "").strip()):
-                text = _clean_text(item["text"])  # type: ignore[index]
+            text: Optional[str] = None
+
+            if itype in ("text", "equation"):
+                candidate = item.get("text", "")
+                if candidate and candidate.strip():
+                    text = _clean_text(candidate)
             elif itype == "list" and (
                 any(text.strip() for text in item.get("list_items", []))
                 or item.get("text", "").strip()
@@ -87,12 +92,17 @@ def _actual_parse(
                 text = _table_text(item)
             else:
                 continue
-            results.append(
-                {
-                    "text": text,
-                    "page_number": int(item.get("page_idx", 0)) + 1,
-                }
-            )
+
+            if not text:
+                continue
+
+            chunk: Dict[str, object] = {
+                "text": text,
+                "page_number": int(item.get("page_idx", 0)) + 1,
+            }
+            if chunk_type and itype == "text" and item.get("text_level") is not None:
+                chunk["type"] = "title"
+            results.append(chunk)
         return results
 
 
@@ -111,7 +121,7 @@ def _worker_process_file(
     file_path: str,
     pipeline: str,
     options: Optional[Dict[str, object]] = None,
-) -> Dict[str, List[Dict[str, int]]]:
+) -> Dict[str, List[Dict[str, object]]]:
     """Run MinerU parsing with a per-task hard timeout using an isolated child process.
 
     This prevents a single stuck PDF from blocking the GPU worker forever.

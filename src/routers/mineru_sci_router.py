@@ -23,6 +23,7 @@ PARSE_TIMEOUT = int(os.getenv("MINERU_SCI_TIMEOUT_SECONDS", "110"))
 async def mineru(
     file: UploadFile = File(...),
     pretty: bool = Depends(pretty_response_flag),
+    chunk_type: bool = False,
 ):
     """
     Use MinerU (sci pipeline) to parse scientific/academic documents and return
@@ -53,7 +54,7 @@ async def mineru(
 
     try:
         # Dispatch to GPU scheduler; this returns a Future
-        fut = scheduler.submit(tmp_path, pipeline="sci")
+        fut = scheduler.submit(tmp_path, pipeline="sci", chunk_type=chunk_type)
         try:
             payload = await asyncio.wait_for(_await_future(fut), timeout=PARSE_TIMEOUT)
         except asyncio.TimeoutError:
@@ -64,7 +65,11 @@ async def mineru(
             )
         # Map back into Pydantic model
         items = [
-            TextElementWithPageNum(text=it["text"], page_number=int(it["page_number"]))
+            TextElementWithPageNum(
+                text=it["text"],
+                page_number=int(it["page_number"]),
+                type=it.get("type") if chunk_type else None,
+            )
             for it in payload.get("result", [])
         ]
         # The sci service has its own filtering logic, which is now inside the worker.

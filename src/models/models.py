@@ -6,6 +6,7 @@ from pydantic import BaseModel
 class TextElementWithPageNum(BaseModel):
     text: str
     page_number: int
+    type: Optional[str] = None
 
 
 class ResponseWithPageNum(BaseModel):

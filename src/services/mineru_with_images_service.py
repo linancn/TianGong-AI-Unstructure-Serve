@@ -217,6 +217,7 @@ def _log_vision_prompt(
 def parse_with_images(
     file_path: str,
     *,
+    chunk_type: bool = False,
     vision_provider: Optional[VisionProvider] = None,
     vision_model: Optional[Union[VisionModel, str]] = None,
 ) -> List[Dict[str, object]]:
@@ -238,6 +239,7 @@ def parse_with_images(
         for item in content_list:
             cur_idx = item_to_block_idx.get(id(item))
             page_number = int(item.get("page_idx", 0)) + 1
+            is_title = item.get("type") == "text" and item.get("text_level") is not None
 
             if item["type"] == "image" and item.get("img_path") and item["img_path"].strip():
                 img_path = os.path.join(output_dir, item["img_path"])
@@ -287,29 +289,39 @@ def parse_with_images(
                         combined_text = f"{base_text}\nImage Description: {vision_result}"
                     else:
                         combined_text = f"Image Description: {vision_result}"
-                    result_items.append(
-                        {
-                            "text": combined_text,
-                            "page_number": page_number,
-                        }
-                    )
+                    chunk = {"text": combined_text, "page_number": page_number}
+                    if chunk_type and is_title:
+                        chunk["type"] = "title"
+                    result_items.append(chunk)
                 except Exception as exc:  # noqa: broad-except - vision call can fail
                     logger.info(f"Error processing image {image_count}/{total_images}: {str(exc)}")
                     img_txt = image_text(item)
                     if img_txt.strip():
-                        result_items.append({"text": img_txt, "page_number": page_number})
+                        chunk = {"text": img_txt, "page_number": page_number}
+                        if chunk_type and is_title:
+                            chunk["type"] = "title"
+                        result_items.append(chunk)
 
             elif item["type"] == "list":
                 list_txt = list_text(item)
                 if list_txt.strip():
-                    result_items.append({"text": list_txt, "page_number": page_number})
+                    chunk = {"text": list_txt, "page_number": page_number}
+                    if chunk_type and is_title:
+                        chunk["type"] = "title"
+                    result_items.append(chunk)
 
             elif item["type"] in ("text", "equation") and item.get("text", "").strip():
-                result_items.append({"text": clean_text(item["text"]), "page_number": page_number})
+                chunk = {"text": clean_text(item["text"]), "page_number": page_number}
+                if chunk_type and is_title:
+                    chunk["type"] = "title"
+                result_items.append(chunk)
             elif item["type"] == "table" and (
                 item.get("table_caption") or item.get("table_body") or item.get("table_footnote")
             ):
-                result_items.append({"text": table_text(item), "page_number": page_number})
+                chunk = {"text": table_text(item), "page_number": page_number}
+                if chunk_type and is_title:
+                    chunk["type"] = "title"
+                result_items.append(chunk)
             elif (
                 item["type"] == "image"
                 and (item.get("img_caption") or item.get("img_footnote"))
@@ -317,16 +329,23 @@ def parse_with_images(
             ):
                 img_txt = image_text(item)
                 if img_txt.strip():
-                    result_items.append({"text": img_txt, "page_number": page_number})
+                    chunk = {"text": img_txt, "page_number": page_number}
+                    if chunk_type and is_title:
+                        chunk["type"] = "title"
+                    result_items.append(chunk)
 
     logger.info(f"Completed processing all {total_images} images")
     return result_items
 
 
-def mineru_service(file_path: str) -> ResponseWithPageNum:
-    payload = parse_with_images(file_path)
+def mineru_service(file_path: str, *, chunk_type: bool = False) -> ResponseWithPageNum:
+    payload = parse_with_images(file_path, chunk_type=chunk_type)
     items = [
-        TextElementWithPageNum(text=entry["text"], page_number=int(entry["page_number"]))
+        TextElementWithPageNum(
+            text=entry["text"],
+            page_number=int(entry["page_number"]),
+            type=entry.get("type"),
+        )
         for entry in payload
     ]
     return ResponseWithPageNum(result=items)

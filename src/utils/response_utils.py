@@ -25,7 +25,7 @@ def json_response(content: Any, pretty: bool, status_code: int = 200) -> Respons
     """Serialize ``content`` to JSON with optional pretty formatting."""
 
     if isinstance(content, BaseModel):
-        payload = content.model_dump(mode="json")
+        payload = content.model_dump(mode="json", exclude_none=True)
     else:
         payload = content
 

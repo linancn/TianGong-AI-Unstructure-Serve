@@ -65,6 +65,7 @@ async def mineru_with_images(
     provider: Optional[VisionProvider] = Depends(_form_provider),
     model: Optional[VisionModel] = Depends(_form_model),
     pretty: bool = Depends(pretty_response_flag),
+    chunk_type: bool = False,
 ):
     """
     Use MinerU with image-aware extraction (figures/tables) and return text chunks with page numbers.
@@ -97,6 +98,7 @@ async def mineru_with_images(
         fut = scheduler.submit(
             tmp_path,
             pipeline="images",
+            chunk_type=chunk_type,
             vision_provider=provider,
             vision_model=model,
         )
@@ -118,7 +120,13 @@ async def mineru_with_images(
                     status_code=500,
                     detail=f"Malformed item returned by MinerU scheduler: {exc}",
                 )
-            items.append(TextElementWithPageNum(text=text, page_number=page_number))
+            items.append(
+                TextElementWithPageNum(
+                    text=text,
+                    page_number=page_number,
+                    type=it.get("type") if chunk_type else None,
+                )
+            )
         response_model = ResponseWithPageNum(result=items)
         return json_response(response_model, pretty)
     except Exception as e:
