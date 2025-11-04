@@ -17,7 +17,7 @@ class ProviderSpec:
     key: str
     models: List[str]
     default_model: str
-    call: Callable[[str, str, Optional[str]], str]
+    call: Callable[[str, str, Optional[str], Optional[str]], str]
     has_credentials: Callable[[], bool]
 
 
@@ -231,6 +231,7 @@ def _provider_from_model(model: Optional[Union[VisionModel, str]]) -> Optional[V
 def vision_completion(
     image_path: str,
     context: str = "",
+    prompt: Optional[str] = None,
     provider: Optional[Union[VisionProvider, str]] = None,
     model: Optional[Union[VisionModel, str]] = None,
 ) -> str:
@@ -248,7 +249,7 @@ def vision_completion(
     if chosen_spec.has_credentials():
         logger.info(f"Vision request using provider='{chosen.value}' model='{resolved_model}'")
         try:
-            result = chosen_spec.call(image_path, context, resolved_model)
+            result = chosen_spec.call(image_path, context, resolved_model, prompt)
             if result is not None:
                 logger.info(
                     f"Vision response received from provider='{chosen.value}' model='{resolved_model}'"
@@ -272,7 +273,7 @@ def vision_completion(
         fallback_model = DEFAULT_MODELS.get(backup, backup_spec.default_model)
         logger.info(f"Vision fallback to provider='{backup.value}' model='{fallback_model}'")
         try:
-            fallback_result = backup_spec.call(image_path, context, fallback_model)
+            fallback_result = backup_spec.call(image_path, context, fallback_model, prompt)
             if fallback_result is not None:
                 logger.info(
                     f"Vision response received from provider='{backup.value}' model='{fallback_model}'"

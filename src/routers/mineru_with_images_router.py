@@ -64,6 +64,10 @@ async def mineru_with_images(
     file: UploadFile = File(...),
     provider: Optional[VisionProvider] = Depends(_form_provider),
     model: Optional[VisionModel] = Depends(_form_model),
+    prompt: Optional[str] = Form(
+        None,
+        description="Optional instruction prompt override passed to the vision model.",
+    ),
     pretty: bool = Depends(pretty_response_flag),
     chunk_type: bool = False,
 ):
@@ -99,6 +103,7 @@ async def mineru_with_images(
             tmp_path,
             pipeline="images",
             chunk_type=chunk_type,
+            vision_prompt=prompt,
             vision_provider=provider,
             vision_model=model,
         )

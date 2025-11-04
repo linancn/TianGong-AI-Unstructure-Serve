@@ -71,6 +71,19 @@ def list_text(item: Dict) -> str:
     return clean_text(item.get("text", ""))
 
 
+def _format_context_line(page_idx: int, text: str, is_title: bool = False) -> str:
+    if not text:
+        return ""
+    prefixes: List[str] = []
+    if page_idx is not None and page_idx >= 0:
+        prefixes.append(f"[Page {int(page_idx) + 1}]")
+    chunk_marker = "[ChunkType=Title]" if is_title else "[ChunkType=Body]"
+    prefixes.append(chunk_marker)
+    if prefixes:
+        return f"{' '.join(prefixes)} {text}"
+    return text
+
+
 def get_prev_context(context_elements: List[Dict], cur_idx: int, n: int) -> str:
     """获取前 n 个非空上下文块文本，倒序拼接。"""
     if cur_idx is None or cur_idx < 0 or not context_elements:
@@ -79,9 +92,15 @@ def get_prev_context(context_elements: List[Dict], cur_idx: int, n: int) -> str:
     j = cur_idx - 1
     while j >= 0 and len(res) < n:
         if j < len(context_elements):
-            text = context_elements[j]["text"].strip()
+            block = context_elements[j]
+            text = block["text"].strip()
             if text:
-                res.insert(0, text)
+                formatted = _format_context_line(
+                    block.get("page_idx", -1),
+                    text,
+                    block.get("is_title", False),
+                )
+                res.insert(0, formatted)
         j -= 1
     return "\n".join(res)
 
@@ -94,9 +113,15 @@ def get_next_context(context_elements: List[Dict], cur_idx: int, n: int) -> str:
     j = cur_idx + 1
     while j < len(context_elements) and len(res) < n:
         if j >= 0:
-            text = context_elements[j]["text"].strip()
+            block = context_elements[j]
+            text = block["text"].strip()
             if text:
-                res.append(text)
+                formatted = _format_context_line(
+                    block.get("page_idx", -1),
+                    text,
+                    block.get("is_title", False),
+                )
+                res.append(formatted)
         j += 1
     return "\n".join(res)
 
@@ -107,11 +132,13 @@ def _build_context_blocks(content_list: List[Dict]) -> List[Dict]:
         block: Optional[Dict] = None
         if item["type"] in ("text", "equation"):
             if item.get("text", "").strip():
+                is_title = bool(item.get("text_level") is not None)
                 block = {
                     "type": item["type"],
                     "text": clean_text(item["text"]),
                     "page_idx": item.get("page_idx", -1),
                     "orig_item": item,
+                    "is_title": is_title,
                 }
         elif item["type"] == "list":
             list_txt = list_text(item)
@@ -121,6 +148,7 @@ def _build_context_blocks(content_list: List[Dict]) -> List[Dict]:
                     "text": list_txt,
                     "page_idx": item.get("page_idx", -1),
                     "orig_item": item,
+                    "is_title": bool(item.get("text_level") is not None),
                 }
         elif item["type"] == "table":
             table_txt = table_text(item)
@@ -130,6 +158,7 @@ def _build_context_blocks(content_list: List[Dict]) -> List[Dict]:
                     "text": table_txt,
                     "page_idx": item.get("page_idx", -1),
                     "orig_item": item,
+                    "is_title": False,
                 }
         elif item["type"] == "image":
             img_txt = image_text(item)
@@ -139,6 +168,7 @@ def _build_context_blocks(content_list: List[Dict]) -> List[Dict]:
                     "text": img_txt,
                     "page_idx": item.get("page_idx", -1),
                     "orig_item": item,
+                    "is_title": False,
                 }
         if block:
             context_blocks.append(block)
@@ -187,10 +217,12 @@ def _build_vision_prompt(item: Dict, contexts: Dict[str, str]) -> Tuple[str, Lis
     captions = "\n".join(item.get("img_caption") or [])
     footnotes = "\n".join(item.get("img_footnote") or [])
     prompt_parts: List[Tuple[str, str]] = []
+    page_idx = item.get("page_idx", -1)
+    page_suffix = f" (Page {int(page_idx) + 1})" if page_idx is not None and page_idx >= 0 else ""
     if captions.strip():
-        prompt_parts.append(("Image caption", captions))
+        prompt_parts.append((f"Image caption{page_suffix}", captions))
     if footnotes.strip():
-        prompt_parts.append(("Image footnote", footnotes))
+        prompt_parts.append((f"Image footnote{page_suffix}", footnotes))
     if contexts["before"].strip():
         prompt_parts.append(("Context before", contexts["before"]))
     if contexts["after"].strip():
@@ -220,6 +252,7 @@ def parse_with_images(
     chunk_type: bool = False,
     vision_provider: Optional[VisionProvider] = None,
     vision_model: Optional[Union[VisionModel, str]] = None,
+    vision_prompt: Optional[str] = None,
 ) -> List[Dict[str, object]]:
     """Run MinerU parsing (GPU scheduler friendly) then enrich figures via multimodal vision."""
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -235,6 +268,10 @@ def parse_with_images(
             if item["type"] == "image" and item.get("img_path") and item["img_path"].strip()
         )
         image_count = 0
+
+        prompt_override = (
+            vision_prompt.strip() if vision_prompt is not None and vision_prompt.strip() else None
+        )
 
         for item in content_list:
             cur_idx = item_to_block_idx.get(id(item))
@@ -255,7 +292,7 @@ def parse_with_images(
                 )
 
                 contexts = _resolve_context_windows(working_blocks, cur_idx, item)
-                prompt, prompt_parts = _build_vision_prompt(item, contexts)
+                context_payload, prompt_parts = _build_vision_prompt(item, contexts)
                 _log_vision_prompt(page_number, contexts, prompt_parts)
 
                 logger.info(f"Image path: {img_path}")
@@ -265,7 +302,8 @@ def parse_with_images(
                     vision_result = clean_text(
                         vision_completion(
                             img_path,
-                            prompt,
+                            context_payload,
+                            prompt=prompt_override,
                             provider=vision_provider,
                             model=vision_model,
                         )
@@ -279,6 +317,7 @@ def parse_with_images(
                         "text": vision_result,
                         "page_idx": item.get("page_idx", -1),
                         "orig_item": item,
+                        "is_title": False,
                     }
                     insert_idx = cur_idx + 1 if cur_idx is not None else len(working_blocks)
                     working_blocks.insert(insert_idx, vision_block)
