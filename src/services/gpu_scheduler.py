@@ -145,7 +145,7 @@ def _worker_process_file(
     proc = multiprocessing.Process(
         target=_child_worker,
         args=(result_queue, file_path, pipeline, options),
-        daemon=True,
+        daemon=False,  # allow downstream libraries to spawn worker processes
     )
     proc.start()
 
