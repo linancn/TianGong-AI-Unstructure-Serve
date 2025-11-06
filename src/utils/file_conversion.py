@@ -30,6 +30,11 @@ CONVERTIBLE_OFFICE_EXTENSIONS: Set[str] = {
     ".xltx",
 }
 
+MARKDOWN_EXTENSIONS: Set[str] = {
+    ".md",
+    ".markdown",
+}
+
 _LIBREOFFICE_BINARIES: Tuple[str, ...] = ("libreoffice", "soffice")
 
 
@@ -128,9 +133,23 @@ def maybe_convert_office_to_pdf(input_path: str, extension: str) -> Tuple[str, L
     return convert_office_document_to_pdf(input_path)
 
 
+def maybe_convert_to_pdf(input_path: str, extension: str) -> Tuple[str, List[str]]:
+    """
+    Convert supported Office documents to PDF, leaving other formats untouched.
+
+    Returns (path_to_use, extra_cleanup_paths list).
+    """
+    normalized_ext = _normalize_extension(extension)
+    if normalized_ext in CONVERTIBLE_OFFICE_EXTENSIONS:
+        return convert_office_document_to_pdf(input_path)
+    return input_path, []
+
+
 __all__ = [
     "CONVERTIBLE_OFFICE_EXTENSIONS",
+    "MARKDOWN_EXTENSIONS",
     "convert_office_document_to_pdf",
     "format_extension_list",
     "maybe_convert_office_to_pdf",
+    "maybe_convert_to_pdf",
 ]

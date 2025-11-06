@@ -14,9 +14,11 @@ from src.services.vision_service import (
 )
 from src.utils.file_conversion import (
     CONVERTIBLE_OFFICE_EXTENSIONS,
+    MARKDOWN_EXTENSIONS,
     format_extension_list,
-    maybe_convert_office_to_pdf,
+    maybe_convert_to_pdf,
 )
+from src.utils.markdown_parser import parse_markdown_chunks
 from src.utils.mineru_support import (
     format_supported_extensions,
     mineru_supported_extensions,
@@ -27,8 +29,9 @@ router = APIRouter()
 
 SUPPORTED_EXTENSIONS = mineru_supported_extensions()
 SUPPORTED_EXTENSIONS_STR = format_supported_extensions()
-CONVERTIBLE_EXTENSIONS_STR = format_extension_list(CONVERTIBLE_OFFICE_EXTENSIONS)
-ACCEPTED_EXTENSIONS = SUPPORTED_EXTENSIONS | CONVERTIBLE_OFFICE_EXTENSIONS
+OFFICE_EXTENSIONS_STR = format_extension_list(CONVERTIBLE_OFFICE_EXTENSIONS)
+MARKDOWN_EXTENSIONS_STR = format_extension_list(MARKDOWN_EXTENSIONS)
+ACCEPTED_EXTENSIONS = SUPPORTED_EXTENSIONS | CONVERTIBLE_OFFICE_EXTENSIONS | MARKDOWN_EXTENSIONS
 ACCEPTED_EXTENSIONS_STR = format_extension_list(ACCEPTED_EXTENSIONS)
 
 
@@ -71,8 +74,11 @@ def _form_model(
     summary="Parse with MinerU (image-aware) and return page-numbered chunks",
     response_model=ResponseWithPageNum,
     response_description="List of text chunks with page numbers",
-    description=f"Supported file types: {ACCEPTED_EXTENSIONS_STR}. "
-    f"Office formats ({CONVERTIBLE_EXTENSIONS_STR}) auto-convert to PDF before parsing.",
+    description=(
+        f"Supported file types: {ACCEPTED_EXTENSIONS_STR}.\n"
+        f"Office formats ({OFFICE_EXTENSIONS_STR}) auto-convert to PDF before parsing.\n"
+        f"Markdown ({MARKDOWN_EXTENSIONS_STR}) is parsed directly via regex-based chunking."
+    ),
 )
 async def mineru_with_images(
     file: UploadFile = File(...),
@@ -89,7 +95,8 @@ async def mineru_with_images(
     Use MinerU with image-aware extraction (figures/tables) and return text chunks with page numbers.
 
     Accepted: {ACCEPTED_EXTENSIONS_STR}
-    Office docs ({CONVERTIBLE_EXTENSIONS_STR}) are converted to PDF before parsing.
+    Office formats ({OFFICE_EXTENSIONS_STR}) auto-convert to PDF before parsing.
+    Markdown ({MARKDOWN_EXTENSIONS_STR}) is parsed directly via regex-based chunking.
     Output: [(text, page_number), ...]
     """
     filename = file.filename or ""
@@ -109,10 +116,18 @@ async def mineru_with_images(
             detail=f"Unsupported file type. Allowed types: {ACCEPTED_EXTENSIONS_STR}",
         )
 
+    file_bytes = await file.read()
+
+    if file_ext in MARKDOWN_EXTENSIONS:
+        text_content = file_bytes.decode("utf-8", errors="ignore")
+        items = parse_markdown_chunks(text_content, chunk_type=chunk_type)
+        response_model = ResponseWithPageNum(result=items)
+        return json_response(response_model, pretty)
+
     # Use a persistent temp file so it survives queueing; we'll clean it up after processing
     tmp = tempfile.NamedTemporaryFile(suffix=file_ext, delete=False)
     try:
-        tmp.write(await file.read())
+        tmp.write(file_bytes)
         tmp.flush()
         tmp_path = tmp.name
     finally:
@@ -123,7 +138,7 @@ async def mineru_with_images(
 
     if file_ext in CONVERTIBLE_OFFICE_EXTENSIONS:
         try:
-            processing_path, conversion_cleanup = maybe_convert_office_to_pdf(tmp_path, file_ext)
+            processing_path, conversion_cleanup = maybe_convert_to_pdf(tmp_path, file_ext)
         except RuntimeError as exc:
             try:
                 os.unlink(tmp_path)
