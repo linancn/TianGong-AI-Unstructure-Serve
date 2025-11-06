@@ -110,9 +110,11 @@ def mineru_service(file_path):
                     text=(
                         clean_text(item["text"])
                         if item["type"] in ("text", "equation")
-                        else list_text(item)
-                        if item["type"] == "list"
-                        else table_text(item) if item["type"] == "table" else image_text(item)
+                        else (
+                            list_text(item)
+                            if item["type"] == "list"
+                            else table_text(item) if item["type"] == "table" else image_text(item)
+                        )
                     ),
                     page_number=item["page_idx"] + 1,
                 )

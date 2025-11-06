@@ -4,5 +4,8 @@
   },
   "search.exclude": {
     "**/weaviate/**": true
-  }
+  },
+  "python.analysis.extraPaths": [
+    "./"
+  ]
 }

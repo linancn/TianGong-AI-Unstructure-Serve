@@ -12,12 +12,24 @@ from src.services.vision_service import (
     VisionModel,
     VisionProvider,
 )
+from src.utils.file_conversion import (
+    CONVERTIBLE_OFFICE_EXTENSIONS,
+    format_extension_list,
+    maybe_convert_office_to_pdf,
+)
+from src.utils.mineru_support import (
+    format_supported_extensions,
+    mineru_supported_extensions,
+)
 from src.utils.response_utils import json_response, pretty_response_flag
 
 router = APIRouter()
 
-# List of allowed file extensions
-ALLOWED_EXTENSIONS = [".pdf", ".png", ".jpeg", ".jpg"]
+SUPPORTED_EXTENSIONS = mineru_supported_extensions()
+SUPPORTED_EXTENSIONS_STR = format_supported_extensions()
+CONVERTIBLE_EXTENSIONS_STR = format_extension_list(CONVERTIBLE_OFFICE_EXTENSIONS)
+ACCEPTED_EXTENSIONS = SUPPORTED_EXTENSIONS | CONVERTIBLE_OFFICE_EXTENSIONS
+ACCEPTED_EXTENSIONS_STR = format_extension_list(ACCEPTED_EXTENSIONS)
 
 
 def _form_provider(
@@ -59,6 +71,8 @@ def _form_model(
     summary="Parse with MinerU (image-aware) and return page-numbered chunks",
     response_model=ResponseWithPageNum,
     response_description="List of text chunks with page numbers",
+    description=f"Supported file types: {ACCEPTED_EXTENSIONS_STR}. "
+    f"Office formats ({CONVERTIBLE_EXTENSIONS_STR}) auto-convert to PDF before parsing.",
 )
 async def mineru_with_images(
     file: UploadFile = File(...),
@@ -71,21 +85,28 @@ async def mineru_with_images(
     pretty: bool = Depends(pretty_response_flag),
     chunk_type: bool = False,
 ):
-    """
+    f"""
     Use MinerU with image-aware extraction (figures/tables) and return text chunks with page numbers.
 
-    Accepted: .pdf, .png, .jpeg, .jpg
+    Accepted: {ACCEPTED_EXTENSIONS_STR}
+    Office docs ({CONVERTIBLE_EXTENSIONS_STR}) are converted to PDF before parsing.
     Output: [(text, page_number), ...]
     """
-    # Get file extension
-    _, file_ext = os.path.splitext(file.filename)
+    filename = file.filename or ""
+    _, file_ext = os.path.splitext(filename)
     file_ext = file_ext.lower()
 
-    # Check if file extension is allowed
-    if file_ext not in ALLOWED_EXTENSIONS:
+    if not file_ext:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file type. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}",
+            detail="Uploaded file is missing an extension; MinerU requires a supported file type.",
+        )
+
+    # Check if file extension is allowed
+    if file_ext not in ACCEPTED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type. Allowed types: {ACCEPTED_EXTENSIONS_STR}",
         )
 
     # Use a persistent temp file so it survives queueing; we'll clean it up after processing
@@ -97,10 +118,25 @@ async def mineru_with_images(
     finally:
         tmp.close()
 
+    conversion_cleanup: list[str] = []
+    processing_path = tmp_path
+
+    if file_ext in CONVERTIBLE_OFFICE_EXTENSIONS:
+        try:
+            processing_path, conversion_cleanup = maybe_convert_office_to_pdf(tmp_path, file_ext)
+        except RuntimeError as exc:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    cleanup_paths = {tmp_path, *conversion_cleanup}
+
     try:
         # Dispatch to GPU scheduler; this returns a Future
         fut = scheduler.submit(
-            tmp_path,
+            processing_path,
             pipeline="images",
             chunk_type=chunk_type,
             vision_prompt=prompt,
@@ -137,10 +173,11 @@ async def mineru_with_images(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
+        for path in cleanup_paths:
+            try:
+                os.unlink(path)
+            except Exception:
+                pass
 
 
 # Small helper to await a concurrent.futures.Future inside async route

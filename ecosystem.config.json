@@ -15,8 +15,8 @@
         "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
         "MINERU_SCI_TIMEOUT_SECONDS": "110",
         "TABLE_OCR": "paddle",
-        "VISION_PROVIDER": "gemini",
-        "VISION_MODEL": "gemini-2.5-flash",
+        "VISION_PROVIDER": "vllm",
+        "VISION_MODEL": "Qwen/Qwen3-VL-30B-A3B-Instruct",
         "VISION_CONTEXT_WINDOW": "4",
         "OCR_AGENT": "unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle",
         "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30000"
