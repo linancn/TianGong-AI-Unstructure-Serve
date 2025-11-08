@@ -6,7 +6,7 @@ import queue
 from concurrent.futures import ProcessPoolExecutor, Future
 from dataclasses import dataclass
 from threading import Lock
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 
 def _worker_init(gpu_id: str):
@@ -137,7 +137,7 @@ def _child_worker(
     try:
         data = _actual_parse(path, pipeline, options)
         q.put({"ok": True, "data": data})
-    except Exception as exc:  # noqa: broad-except - propagate failure info through queue
+    except Exception as exc:  # noqa: BLE001 - propagate failure info through queue
         q.put({"ok": False, "error": str(exc)})
 
 

@@ -237,9 +237,12 @@ def _log_vision_prompt(
 ) -> None:
     before_ctx = contexts.get("before", "").strip() or "<empty>"
     after_ctx = contexts.get("after", "").strip() or "<empty>"
-    # logger.info(
-    #     f"Vision context for page {page_number}\n  before: {before_ctx}\n  after: {after_ctx}"
-    # )
+    logger.debug(
+        "Vision context for page {page_number}\n  before: {before}\n  after: {after}",
+        page_number=page_number,
+        before=before_ctx,
+        after=after_ctx,
+    )
     if prompt_parts:
         formatted = "\n".join(f"  {label}: {value}" for label, value in prompt_parts)
         logger.info(f"Vision prompt payload for page {page_number}:\n{formatted}")
@@ -361,7 +364,7 @@ def parse_with_images(
                                 "page_idx": item.get("page_idx"),
                             }
                         )
-                except Exception as exc:  # noqa: broad-except - vision call can fail
+                except Exception as exc:  # noqa: BLE001 - vision call can fail
                     logger.info(f"Error processing image {image_count}/{total_images}: {str(exc)}")
                     img_txt = image_text(item)
                     if img_txt.strip():

@@ -1,4 +1,3 @@
-import os
 import tempfile
 import re
 from src.services.mineru_service_full import parse_doc
@@ -131,9 +130,7 @@ def mineru_service(file_path, *, return_markdown: bool = False):
             )
         ]
 
-        markdown_text = (
-            build_clean_markdown(filtered_items) if return_markdown else None
-        )
+        markdown_text = build_clean_markdown(filtered_items) if return_markdown else None
 
         response = ResponseWithPageNum(
             result=[

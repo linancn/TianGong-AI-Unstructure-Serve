@@ -21,7 +21,6 @@ from mineru.backend.pipeline.model_json_to_middle_json import (
     result_to_middle_json as pipeline_result_to_middle_json,
 )
 from mineru.backend.vlm.vlm_middle_json_mkcontent import union_make as vlm_union_make
-from mineru.utils.models_download_utils import auto_download_and_get_model_root_path
 from src.services.mineru_markdown import build_clean_markdown
 
 
@@ -464,9 +463,7 @@ def parse_doc(
 
         content_list, output_dir_path = response
         markdown_text = (
-            build_clean_markdown(content_list)
-            if return_markdown and content_list
-            else None
+            build_clean_markdown(content_list) if return_markdown and content_list else None
         )
         return content_list, output_dir_path, markdown_text
     except Exception as e:

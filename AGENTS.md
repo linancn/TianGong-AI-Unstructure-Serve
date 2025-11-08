@@ -1,0 +1,87 @@
+# TianGong AI Unstructure Serve 代理说明
+
+## 项目概览
+- 这是一个基于 FastAPI 的非结构化文档解析与知识入库服务，负责统一封装 MinerU 文档解析、Markdown 转档、MinIO 对象存储、Weaviate 向量数据库写入以及视觉问答能力。
+- 主入口在 `src/main.py`，通过依赖注入决定是否开启 Bearer Token 鉴权，并集中挂载各类路由（健康检查、GPU 调度、MinerU 解析、Markdown 转 DOCX、MinIO 上传下载、Weaviate 入库等）。
+- GPU 解析任务由自研调度器 `src/services/gpu_scheduler.py` 进行统一排队、超时控制和多进程执行，保障 MinerU 解析稳定性。
+- 视觉模型封装在 `src/services/vision_service.py`，按环境变量动态选择 OpenAI、Gemini 或 vLLM 服务，并对模型列表、默认模型及凭证做运行时校验。
+
+## 目录速览
+- `src/routers/`：各业务路由。`mineru_router.py`/`mineru_sci_router.py`/`mineru_with_images_router.py` 针对不同解析流程，`markdown_router.py` 负责 Markdown→DOCX，`minio_router.py` 负责对象存储操作，`weaviate_router.py` 负责文档入库，`gpu_router.py` 暴露调度状态，`health_router.py` 提供健康检查。
+- `src/services/`：服务层实现。包含 MinerU 解析全流程（含图片/科研版）、Markdown 生成、MinIO 封装、Weaviate 客户端、视觉模型调用及 GPU 调度。
+- `src/utils/`：工具函数，例如统一 JSON 响应包装、Markdown 预处理、Office→PDF 转换、MinerU 支持文件扩展名查询等。
+- `src/models/`：Pydantic 数据模型，描述 API 的入参与返回结构（如 `ResponseWithPageNum`、`InsertSummary` 等）。
+- `weaviate/`：Weaviate 相关脚本或资源。外部服务容器启动见 README。
+- 根目录还包含 `README.md`（环境配置与运维命令）、多个 `ecosystem*.json`（pm2 启动模板）以及 `pyproject.toml`/`uv.lock`（依赖声明）。
+
+## 核心功能
+- **MinerU 文档解析**（`src/routers/mineru_router.py` 等）  
+  - 支持 PDF、Office、Markdown 等格式，利用 `maybe_convert_to_pdf` 先行格式统一，再调用 GPU 调度器执行 MinerU 管线。  
+  - 可选返回 Markdown、内容类型标签等信息，结果统一映射到 `TextElementWithPageNum` 模型。
+- **Weaviate 入库**（`src/routers/weaviate_router.py`）  
+  - 解析流程同 MinerU，并在需要时将 PDF、截图等资产上传至 MinIO（`upload_pdf_bundle`），随后调用 `insert_text_chunks` 将分块文本写入指定 collection。  
+  - 支持根据用户与知识库名称生成合法 class 名（`build_weaviate_collection_name`），并可选择视觉模型抽取摘要。
+- **MinIO 对象操作**（`src/routers/minio_router.py`）  
+  - 封装上传/下载所需的 endpoint 解析、bucket 校验与对象名规范化，所有异常以 HTTP 错误返回。  
+  - 通用配置结构 `MinioConfig` 写在 `src/services/minio_storage.py`。
+- **Markdown 工具链**（`src/routers/markdown_router.py` & `src/services/markdown_service.py`）  
+  - 允许上传 Markdown 文本和可选的 reference DOCX 模板，将内容转换为 DOCX 并按需清理文档样式（依赖 Pandoc 与 python-docx）。
+- **GPU 调度与监控**（`src/services/gpu_scheduler.py`）  
+  - 按 GPU ID 创建 `ProcessPoolExecutor`，每个任务在独立子进程执行，并设有硬超时以防解析卡死。  
+  - `/gpu/status` 路由可以查询每块 GPU 的排队任务数及运行情况。
+- **视觉问答/解析**（`src/services/vision_service.py`）  
+  - 统一调度 OpenAI、Gemini、vLLM 视觉大模型，按环境变量控制可用 provider、模型及凭证。
+
+## 配置与敏感信息
+- 所有默认配置来自 `.secrets/secrets.toml`，通过 `src/config/config.py` 读取，并允许环境变量覆盖。敏感字段包括 FASTAPI Bearer Token、OpenAI/Gemini/VLLM API Key 等。
+- 关键环境变量：  
+  - `FASTAPI_AUTH` / `FASTAPI_BEARER_TOKEN`：是否开启 Bearer 鉴权及令牌值。  
+  - `MINERU_*`：控制 MinerU 模型源、VLM 服务地址、任务超时时间。  
+  - `VISION_PROVIDER_CHOICES`、`VISION_MODELS_*`：视觉模型白名单。  
+  - `WEAVIATE_*`：Weaviate 服务地址。  
+  - `MINIO_*`：MinIO 凭证与目标桶。  
+  - `CUDA_VISIBLE_DEVICES`：运行时显卡绑定。
+- 本仓库默认将 `.secrets/` 视为外部私有目录，确保部署前准备好相应文件。
+
+## 环境准备与运行
+- 推荐使用 [uv](https://docs.astral.sh/uv/) 管理 Python 3.12 及依赖：`uv python install 3.12` → `uv sync`。
+- 系统依赖需通过 `apt` 安装：`libmagic-dev`、`poppler-utils`、`libreoffice`、`pandoc`、`graphicsmagick` 等，以支持 Office 转 PDF、文档解析及图片处理。
+- 首次运行需下载 MinerU 模型：  
+  ```bash
+  wget https://gcore.jsdelivr.net/gh/opendatalab/MinerU@master/scripts/download_models_hf.py -O download_models_hf.py
+  uv run python download_models_hf.py
+  ```
+- 启动方式：  
+  ```bash
+  MINERU_MODEL_SOURCE=modelscope uvicorn src.main:app --host 0.0.0.0 --port 7770
+  ```  
+  也可按 README 中示例在多 GPU 上启动多个实例，或使用 `pm2 start ecosystem.config.json` 等文件管理进程。
+- 附属服务容器：  
+  - Kroki（图表渲染）：`docker run -d -p 7999:8000 --restart unless-stopped yuzutech/kroki`  
+  - Quickchart：`docker run -d -p 7998:3400 --restart unless-stopped ianw/quickchart`  
+  - MinIO：参考 README 使用 `quay.io/minio/minio` 镜像。  
+  - MinerU vLLM Server：`MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=0 mineru-vllm-server --port 30000`
+
+## 开发与质量保障
+- 代码格式与质量检查：  
+  ```bash
+  uv run --group dev black .
+  uv run --group dev ruff check src
+  uv run --group dev pytest
+  ```
+- 代码中针对 Ruff 规则（F401/BLE001/E722 等）已统一清理未使用依赖，并将异常捕获限定在预期类型；后续新增 try/except 块时请保持同等粒度。
+- 图像增强流程的 `_log_vision_prompt` 使用 `logger.debug` 输出前后文，默认不会污染 info 级日志，如需调试可上调日志级别。
+- 建议通过 `/health` 做存活探测，`/gpu/status` 监控排队，MinIO/Weaviate 接口应配合真实服务验证。
+- 解析路径经常涉及临时文件，注意及时释放；`gpu_scheduler` 已在 finally 中做清理，但新增逻辑时需保持一致。
+
+## 常见运维提示
+- 若端口被占用，可参考 README 中的 `lsof` + `kill` 脚本快速清理 7770/8770-8772。
+- 解析失败常见原因：  
+  - Pandoc 未安装或 PATH 配置错误。  
+  - MinIO / Weaviate 连接参数缺失或证书配置不当。  
+  - GPU 资源不足导致 MinerU 调度超时。
+- 从 `/weaviate/` 下的脚本可了解向量库 schema 管理方式，遇到 schema 变更需同步更新 `create_collection_if_not_exists` 默认字段。
+
+## 协作约定
+- **重要：以后每次修改，都要同步修改 `AGENTS.md`，确保本文档与代码状态一致。**
+- 引入新依赖、环境变量、路由或调整解析流程时，请在此文档补充背景、关键入口与测试方式，方便后续代理与开发者快速接手。

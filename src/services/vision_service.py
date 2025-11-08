@@ -254,7 +254,7 @@ def vision_completion(
                 logger.info(
                     f"Vision response received from provider='{chosen.value}' model='{resolved_model}'"
                 )
-        except Exception as exc:  # noqa: broad-except - provider call may raise
+        except Exception as exc:  # noqa: BLE001 - provider call may raise
             logger.info(f"Vision provider '{chosen.value}' failed: {exc}")
     else:
         logger.info(
@@ -279,7 +279,7 @@ def vision_completion(
                     f"Vision response received from provider='{backup.value}' model='{fallback_model}'"
                 )
                 return fallback_result
-        except Exception as exc:  # noqa: broad-except - provider call may raise
+        except Exception as exc:  # noqa: BLE001 - provider call may raise
             logger.info(f"Vision provider '{backup.value}' failed: {exc}")
 
     raise RuntimeError(

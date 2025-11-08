@@ -12,7 +12,6 @@ from typing import Final
 
 try:
     from docx import Document
-    from docx.shared import Pt, RGBColor
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
@@ -185,7 +184,7 @@ def _clean_and_enhance_paragraph_style(paragraph, doc) -> None:
                         or rFonts.get(qn("w:hAnsi"))
                     ):
                         style_has_fonts = True
-        except:
+        except (KeyError, AttributeError, TypeError):
             pass
 
     # Elements to remove (these often conflict with style definitions)
@@ -240,7 +239,7 @@ def _clean_and_enhance_paragraph_style(paragraph, doc) -> None:
     if style_name:
         try:
             paragraph.style = style_name
-        except:
+        except (KeyError, ValueError, AttributeError):
             pass  # Style might not exist, keep current
 
 
