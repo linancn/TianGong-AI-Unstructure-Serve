@@ -7,7 +7,7 @@ from loguru import logger
 
 from src.models.models import ResponseWithPageNum, TextElementWithPageNum
 from src.services.mineru_service_full import parse_doc
-from src.services.mineru_markdown import build_clean_markdown
+from src.utils.text_output import build_plain_text
 from src.services.vision_service import (
     VisionModel,
     VisionProvider,
@@ -257,7 +257,7 @@ def parse_with_images(
     vision_provider: Optional[VisionProvider] = None,
     vision_model: Optional[Union[VisionModel, str]] = None,
     vision_prompt: Optional[str] = None,
-    return_markdown: bool = False,
+    return_txt: bool = False,
 ) -> Tuple[List[Dict[str, object]], Optional[str]]:
     """Run MinerU parsing (GPU scheduler friendly) then enrich figures via multimodal vision."""
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -267,7 +267,6 @@ def parse_with_images(
         item_to_block_idx = _reindex_blocks(working_blocks)
 
         result_items: List[Dict[str, object]] = []
-        markdown_items: List[Dict[str, object]] = []
         total_images = sum(
             1
             for item in content_list
@@ -345,25 +344,6 @@ def parse_with_images(
                     if chunk_type and is_title:
                         chunk["type"] = "title"
                     result_items.append(chunk)
-                    captions = list(item.get("img_caption") or [])
-                    footnotes = list(item.get("img_footnote") or [])
-                    if captions or footnotes:
-                        markdown_items.append(
-                            {
-                                "type": "image",
-                                "img_caption": captions,
-                                "img_footnote": footnotes,
-                                "page_idx": item.get("page_idx"),
-                            }
-                        )
-                    if vision_summary:
-                        markdown_items.append(
-                            {
-                                "type": "text",
-                                "text": f"Image Description: {vision_result}",
-                                "page_idx": item.get("page_idx"),
-                            }
-                        )
                 except Exception as exc:  # noqa: BLE001 - vision call can fail
                     logger.info(f"Error processing image {image_count}/{total_images}: {str(exc)}")
                     img_txt = image_text(item)
@@ -372,17 +352,6 @@ def parse_with_images(
                         if chunk_type and is_title:
                             chunk["type"] = "title"
                         result_items.append(chunk)
-                        captions = list(item.get("img_caption") or [])
-                        footnotes = list(item.get("img_footnote") or [])
-                        if captions or footnotes:
-                            markdown_items.append(
-                                {
-                                    "type": "image",
-                                    "img_caption": captions,
-                                    "img_footnote": footnotes,
-                                    "page_idx": item.get("page_idx"),
-                                }
-                            )
 
             elif item["type"] == "list":
                 list_txt = list_text(item)
@@ -391,29 +360,12 @@ def parse_with_images(
                     if chunk_type and is_title:
                         chunk["type"] = "title"
                     result_items.append(chunk)
-                    markdown_items.append(
-                        {
-                            "type": "list",
-                            "list_items": list(item.get("list_items") or []),
-                            "text": item.get("text"),
-                            "text_level": item.get("text_level"),
-                            "page_idx": item.get("page_idx"),
-                        }
-                    )
 
             elif item["type"] in ("text", "equation") and item.get("text", "").strip():
                 chunk = {"text": clean_text(item["text"]), "page_number": page_number}
                 if chunk_type and is_title:
                     chunk["type"] = "title"
                 result_items.append(chunk)
-                markdown_items.append(
-                    {
-                        "type": item["type"],
-                        "text": item.get("text"),
-                        "text_level": item.get("text_level"),
-                        "page_idx": item.get("page_idx"),
-                    }
-                )
             elif item["type"] == "table" and (
                 item.get("table_caption") or item.get("table_body") or item.get("table_footnote")
             ):
@@ -421,15 +373,6 @@ def parse_with_images(
                 if chunk_type and is_title:
                     chunk["type"] = "title"
                 result_items.append(chunk)
-                markdown_items.append(
-                    {
-                        "type": "table",
-                        "table_caption": list(item.get("table_caption") or []),
-                        "table_body": item.get("table_body"),
-                        "table_footnote": list(item.get("table_footnote") or []),
-                        "page_idx": item.get("page_idx"),
-                    }
-                )
             elif (
                 item["type"] == "image"
                 and (item.get("img_caption") or item.get("img_footnote"))
@@ -441,27 +384,19 @@ def parse_with_images(
                     if chunk_type and is_title:
                         chunk["type"] = "title"
                     result_items.append(chunk)
-                    markdown_items.append(
-                        {
-                            "type": "image",
-                            "img_caption": list(item.get("img_caption") or []),
-                            "img_footnote": list(item.get("img_footnote") or []),
-                            "page_idx": item.get("page_idx"),
-                        }
-                    )
 
     logger.info(f"Completed processing all {total_images} images")
-    markdown_text = build_clean_markdown(markdown_items) if return_markdown else None
-    return result_items, markdown_text
+    txt_text = build_plain_text(result_items) if return_txt else None
+    return result_items, txt_text
 
 
 def mineru_service(
-    file_path: str, *, chunk_type: bool = False, return_markdown: bool = False
+    file_path: str, *, chunk_type: bool = False, return_txt: bool = False
 ) -> ResponseWithPageNum:
-    payload, markdown_text = parse_with_images(
+    payload, txt_text = parse_with_images(
         file_path,
         chunk_type=chunk_type,
-        return_markdown=return_markdown,
+        return_txt=return_txt,
     )
     items = [
         TextElementWithPageNum(
@@ -471,4 +406,4 @@ def mineru_service(
         )
         for entry in payload
     ]
-    return ResponseWithPageNum(result=items, markdown=markdown_text)
+    return ResponseWithPageNum(result=items, txt=txt_text)

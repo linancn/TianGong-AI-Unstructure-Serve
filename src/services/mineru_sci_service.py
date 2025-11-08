@@ -3,7 +3,7 @@ import re
 from src.services.mineru_service_full import parse_doc
 
 from src.models.models import ResponseWithPageNum, TextElementWithPageNum
-from src.services.mineru_markdown import build_clean_markdown
+from src.utils.text_output import build_plain_text
 
 
 def clean_text(text):
@@ -98,7 +98,7 @@ def filter_references(content_list):
     return filtered_content
 
 
-def mineru_service(file_path, *, return_markdown: bool = False):
+def mineru_service(file_path, *, return_txt: bool = False):
     with tempfile.TemporaryDirectory() as tmp_dir:
         content_list_content, _, _ = parse_doc([file_path], tmp_dir)
         content_list_content = filter_references(content_list_content)
@@ -130,25 +130,32 @@ def mineru_service(file_path, *, return_markdown: bool = False):
             )
         ]
 
-        markdown_text = build_clean_markdown(filtered_items) if return_markdown else None
+        response_items = [
+            TextElementWithPageNum(
+                text=(
+                    clean_text(item["text"])
+                    if item["type"] in ("text", "equation")
+                    else (
+                        list_text(item)
+                        if item["type"] == "list"
+                        else table_text(item) if item["type"] == "table" else image_text(item)
+                    )
+                ),
+                page_number=item["page_idx"] + 1,
+                type=(
+                    "title"
+                    if item["type"] in ("text", "equation") and item.get("text_level") is not None
+                    else None
+                ),
+            )
+            for item in filtered_items
+        ]
+
+        txt_text = build_plain_text(response_items) if return_txt else None
 
         response = ResponseWithPageNum(
-            result=[
-                TextElementWithPageNum(
-                    text=(
-                        clean_text(item["text"])
-                        if item["type"] in ("text", "equation")
-                        else (
-                            list_text(item)
-                            if item["type"] == "list"
-                            else table_text(item) if item["type"] == "table" else image_text(item)
-                        )
-                    ),
-                    page_number=item["page_idx"] + 1,
-                )
-                for item in filtered_items
-            ],
-            markdown=markdown_text,
+            result=response_items,
+            txt=txt_text,
         )
 
         return response

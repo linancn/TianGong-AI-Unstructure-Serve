@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from threading import Lock
 from typing import Dict, List, Optional
 
+from src.utils.text_output import build_plain_text
+
 
 def _worker_init(gpu_id: str):
     """Initializer for each worker process to pin visibility to a single GPU."""
@@ -59,27 +61,27 @@ def _actual_parse(
     """Inner heavy parse logic (run inside an isolated subprocess watchdog)."""
     options = dict(options or {})
     chunk_type = bool(options.pop("chunk_type", False))
-    return_markdown = bool(options.pop("return_markdown", False))
+    return_txt = bool(options.pop("return_txt", False))
     if pipeline == "images":
         from src.services.mineru_with_images_service import parse_with_images
 
-        result_items, markdown_text = parse_with_images(
+        result_items, txt_text = parse_with_images(
             file_path,
             chunk_type=chunk_type,
-            return_markdown=return_markdown,
+            return_txt=return_txt,
             **options,
         )
-        return {"result": result_items, "markdown": markdown_text}
+        return {"result": result_items, "txt": txt_text}
     if pipeline == "sci":
         from src.services.mineru_sci_service import parse_doc
     else:  # default
         from src.services.mineru_service_full import parse_doc
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        content_list_content, _, markdown_candidate = parse_doc(
+        content_list_content, _, txt_candidate = parse_doc(
             [file_path],
             tmp_dir,
-            return_markdown=return_markdown,
+            return_txt=return_txt,
             **options,
         )
         results: List[Dict[str, object]] = []
@@ -118,16 +120,14 @@ def _actual_parse(
             results.append(chunk)
             filtered_items.append(item)
 
-        markdown_text = None
-        if return_markdown:
-            if markdown_candidate is not None:
-                markdown_text = markdown_candidate
+        txt_text = None
+        if return_txt:
+            if txt_candidate:
+                txt_text = txt_candidate
             else:
-                from src.services.mineru_markdown import build_clean_markdown
+                txt_text = build_plain_text(results)
 
-                markdown_text = build_clean_markdown(filtered_items)
-
-        return {"result": results, "markdown": markdown_text}
+        return {"result": results, "txt": txt_text}
 
 
 def _child_worker(

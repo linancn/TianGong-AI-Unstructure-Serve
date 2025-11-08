@@ -17,6 +17,7 @@ from src.utils.mineru_support import (
     mineru_supported_extensions,
 )
 from src.utils.response_utils import json_response, pretty_response_flag
+from src.utils.text_output import build_plain_text
 
 router = APIRouter()
 
@@ -44,7 +45,7 @@ async def mineru(
     file: UploadFile = File(...),
     pretty: bool = Depends(pretty_response_flag),
     chunk_type: bool = False,
-    return_markdown: bool = False,
+    return_txt: bool = False,
 ):
     f"""
     Use MinerU (sci pipeline) to parse scientific/academic documents and return
@@ -77,8 +78,8 @@ async def mineru(
     if file_ext in MARKDOWN_EXTENSIONS:
         text_content = file_bytes.decode("utf-8", errors="ignore")
         items = parse_markdown_chunks(text_content, chunk_type=chunk_type)
-        markdown_text = text_content if return_markdown else None
-        response_model = ResponseWithPageNum(result=items, markdown=markdown_text)
+        txt_text = build_plain_text(items) if return_txt else None
+        response_model = ResponseWithPageNum(result=items, txt=txt_text)
         return json_response(response_model, pretty)
 
     # Use a persistent temp file so it survives queueing; we'll clean it up after processing
@@ -111,7 +112,7 @@ async def mineru(
             processing_path,
             pipeline="sci",
             chunk_type=chunk_type,
-            return_markdown=return_markdown,
+            return_txt=return_txt,
         )
         try:
             payload = await asyncio.wait_for(_await_future(fut), timeout=PARSE_TIMEOUT)
@@ -132,10 +133,10 @@ async def mineru(
         ]
         # The sci service has its own filtering logic, which is now inside the worker.
         # We just need to reconstruct the response.
-        response_model = ResponseWithPageNum(
-            result=items,
-            markdown=payload.get("markdown"),
-        )
+        txt_text = payload.get("txt")
+        if return_txt and not txt_text:
+            txt_text = build_plain_text(items)
+        response_model = ResponseWithPageNum(result=items, txt=txt_text if return_txt else None)
         return json_response(response_model, pretty)
     except TimeoutError as e:  # from hard timeout in worker layer
         raise HTTPException(status_code=504, detail=str(e))

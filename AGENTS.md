@@ -9,15 +9,15 @@
 ## 目录速览
 - `src/routers/`：各业务路由。`mineru_router.py`/`mineru_sci_router.py`/`mineru_with_images_router.py` 针对不同解析流程，`markdown_router.py` 负责 Markdown→DOCX，`minio_router.py` 负责对象存储操作，`weaviate_router.py` 负责文档入库，`gpu_router.py` 暴露调度状态，`health_router.py` 提供健康检查。
 - `src/services/`：服务层实现。包含 MinerU 解析全流程（含图片/科研版）、Markdown 生成、MinIO 封装、Weaviate 客户端、视觉模型调用及 GPU 调度。
-- `src/utils/`：工具函数，例如统一 JSON 响应包装、Markdown 预处理、Office→PDF 转换、MinerU 支持文件扩展名查询等。
-- `src/models/`：Pydantic 数据模型，描述 API 的入参与返回结构（如 `ResponseWithPageNum`、`InsertSummary` 等）。
+- `src/utils/`：工具函数，例如统一 JSON 响应包装、Markdown 预处理、Office→PDF 转换、MinerU 支持文件扩展名查询、纯文本导出等。
+- `src/models/`：Pydantic 数据模型，描述 API 的入参与返回结构（如 `ResponseWithPageNum`（含可选 `txt` 字段）、`InsertSummary` 等）。
 - `weaviate/`：Weaviate 相关脚本或资源。外部服务容器启动见 README。
 - 根目录还包含 `README.md`（环境配置与运维命令）、多个 `ecosystem*.json`（pm2 启动模板）以及 `pyproject.toml`/`uv.lock`（依赖声明）。
 
 ## 核心功能
 - **MinerU 文档解析**（`src/routers/mineru_router.py` 等）  
   - 支持 PDF、Office、Markdown 等格式，利用 `maybe_convert_to_pdf` 先行格式统一，再调用 GPU 调度器执行 MinerU 管线。  
-  - 可选返回 Markdown、内容类型标签等信息，结果统一映射到 `TextElementWithPageNum` 模型。
+  - 可选通过 `return_txt` 返回纯文本串（标题段落追加 `\n\n`、普通段落 `\n`）及内容类型标签，结果统一映射到 `TextElementWithPageNum` 模型。
 - **Weaviate 入库**（`src/routers/weaviate_router.py`）  
   - 解析流程同 MinerU，并在需要时将 PDF、截图等资产上传至 MinIO（`upload_pdf_bundle`），随后调用 `insert_text_chunks` 将分块文本写入指定 collection。  
   - 支持根据用户与知识库名称生成合法 class 名（`build_weaviate_collection_name`），并可选择视觉模型抽取摘要。

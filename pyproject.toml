@@ -52,3 +52,6 @@ exclude = '''
 	| ^/weaviate/weaviate_data/
 )
 '''
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
