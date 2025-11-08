@@ -44,6 +44,7 @@ async def mineru(
     file: UploadFile = File(...),
     pretty: bool = Depends(pretty_response_flag),
     chunk_type: bool = False,
+    return_markdown: bool = False,
 ):
     f"""
     Use MinerU (sci pipeline) to parse scientific/academic documents and return
@@ -76,7 +77,8 @@ async def mineru(
     if file_ext in MARKDOWN_EXTENSIONS:
         text_content = file_bytes.decode("utf-8", errors="ignore")
         items = parse_markdown_chunks(text_content, chunk_type=chunk_type)
-        response_model = ResponseWithPageNum(result=items)
+        markdown_text = text_content if return_markdown else None
+        response_model = ResponseWithPageNum(result=items, markdown=markdown_text)
         return json_response(response_model, pretty)
 
     # Use a persistent temp file so it survives queueing; we'll clean it up after processing
@@ -105,7 +107,12 @@ async def mineru(
 
     try:
         # Dispatch to GPU scheduler; this returns a Future
-        fut = scheduler.submit(processing_path, pipeline="sci", chunk_type=chunk_type)
+        fut = scheduler.submit(
+            processing_path,
+            pipeline="sci",
+            chunk_type=chunk_type,
+            return_markdown=return_markdown,
+        )
         try:
             payload = await asyncio.wait_for(_await_future(fut), timeout=PARSE_TIMEOUT)
         except asyncio.TimeoutError:
@@ -125,7 +132,10 @@ async def mineru(
         ]
         # The sci service has its own filtering logic, which is now inside the worker.
         # We just need to reconstruct the response.
-        response_model = ResponseWithPageNum(result=items)
+        response_model = ResponseWithPageNum(
+            result=items,
+            markdown=payload.get("markdown"),
+        )
         return json_response(response_model, pretty)
     except TimeoutError as e:  # from hard timeout in worker layer
         raise HTTPException(status_code=504, detail=str(e))

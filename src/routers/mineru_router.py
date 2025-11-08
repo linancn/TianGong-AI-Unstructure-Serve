@@ -43,6 +43,7 @@ async def mineru(
     file: UploadFile = File(...),
     pretty: bool = Depends(pretty_response_flag),
     chunk_type: bool = False,
+    return_markdown: bool = False,
 ):
     f"""
     Use MinerU to parse a document and return text chunks with page numbers.
@@ -74,7 +75,8 @@ async def mineru(
     if file_ext in MARKDOWN_EXTENSIONS:
         text_content = file_bytes.decode("utf-8", errors="ignore")
         items = parse_markdown_chunks(text_content, chunk_type=chunk_type)
-        response_model = ResponseWithPageNum(result=items)
+        markdown_text = text_content if return_markdown else None
+        response_model = ResponseWithPageNum(result=items, markdown=markdown_text)
         return json_response(response_model, pretty)
 
     # Use a persistent temp file so it survives queueing; we'll clean it up after processing
@@ -103,7 +105,11 @@ async def mineru(
 
     try:
         # Dispatch to GPU scheduler; this returns a Future
-        fut = scheduler.submit(processing_path, chunk_type=chunk_type)
+        fut = scheduler.submit(
+            processing_path,
+            chunk_type=chunk_type,
+            return_markdown=return_markdown,
+        )
         payload = await _await_future(fut)
         # Map back into Pydantic model
         items = [
@@ -114,7 +120,10 @@ async def mineru(
             )
             for it in payload.get("result", [])
         ]
-        response_model = ResponseWithPageNum(result=items)
+        response_model = ResponseWithPageNum(
+            result=items,
+            markdown=payload.get("markdown"),
+        )
         return json_response(response_model, pretty)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

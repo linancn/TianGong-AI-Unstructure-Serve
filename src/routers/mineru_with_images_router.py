@@ -90,6 +90,7 @@ async def mineru_with_images(
     ),
     pretty: bool = Depends(pretty_response_flag),
     chunk_type: bool = False,
+    return_markdown: bool = False,
 ):
     f"""
     Use MinerU with image-aware extraction (figures/tables) and return text chunks with page numbers.
@@ -121,7 +122,8 @@ async def mineru_with_images(
     if file_ext in MARKDOWN_EXTENSIONS:
         text_content = file_bytes.decode("utf-8", errors="ignore")
         items = parse_markdown_chunks(text_content, chunk_type=chunk_type)
-        response_model = ResponseWithPageNum(result=items)
+        markdown_text = text_content if return_markdown else None
+        response_model = ResponseWithPageNum(result=items, markdown=markdown_text)
         return json_response(response_model, pretty)
 
     # Use a persistent temp file so it survives queueing; we'll clean it up after processing
@@ -157,6 +159,7 @@ async def mineru_with_images(
             vision_prompt=prompt,
             vision_provider=provider,
             vision_model=model,
+            return_markdown=return_markdown,
         )
         payload = await _await_future(fut)
         result_payload = payload.get("result")
@@ -183,7 +186,10 @@ async def mineru_with_images(
                     type=it.get("type") if chunk_type else None,
                 )
             )
-        response_model = ResponseWithPageNum(result=items)
+        response_model = ResponseWithPageNum(
+            result=items,
+            markdown=payload.get("markdown"),
+        )
         return json_response(response_model, pretty)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

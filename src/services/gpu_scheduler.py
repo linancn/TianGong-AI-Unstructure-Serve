@@ -55,22 +55,35 @@ def _list_text(item: dict) -> str:
 
 def _actual_parse(
     file_path: str, pipeline: str, options: Optional[Dict[str, object]] = None
-) -> List[Dict[str, object]]:
+) -> Dict[str, object]:
     """Inner heavy parse logic (run inside an isolated subprocess watchdog)."""
     options = dict(options or {})
     chunk_type = bool(options.pop("chunk_type", False))
+    return_markdown = bool(options.pop("return_markdown", False))
     if pipeline == "images":
         from src.services.mineru_with_images_service import parse_with_images
 
-        return parse_with_images(file_path, chunk_type=chunk_type, **options)
+        result_items, markdown_text = parse_with_images(
+            file_path,
+            chunk_type=chunk_type,
+            return_markdown=return_markdown,
+            **options,
+        )
+        return {"result": result_items, "markdown": markdown_text}
     if pipeline == "sci":
         from src.services.mineru_sci_service import parse_doc
     else:  # default
         from src.services.mineru_service_full import parse_doc
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        content_list_content, _ = parse_doc([file_path], tmp_dir)
+        content_list_content, _, markdown_candidate = parse_doc(
+            [file_path],
+            tmp_dir,
+            return_markdown=return_markdown,
+            **options,
+        )
         results: List[Dict[str, object]] = []
+        filtered_items: List[dict] = []
         for item in content_list_content:
             itype = item.get("type")
             text: Optional[str] = None
@@ -103,7 +116,18 @@ def _actual_parse(
             if chunk_type and itype == "text" and item.get("text_level") is not None:
                 chunk["type"] = "title"
             results.append(chunk)
-        return results
+            filtered_items.append(item)
+
+        markdown_text = None
+        if return_markdown:
+            if markdown_candidate is not None:
+                markdown_text = markdown_candidate
+            else:
+                from src.services.mineru_markdown import build_clean_markdown
+
+                markdown_text = build_clean_markdown(filtered_items)
+
+        return {"result": results, "markdown": markdown_text}
 
 
 def _child_worker(
@@ -121,7 +145,7 @@ def _worker_process_file(
     file_path: str,
     pipeline: str,
     options: Optional[Dict[str, object]] = None,
-) -> Dict[str, List[Dict[str, object]]]:
+) -> Dict[str, object]:
     """Run MinerU parsing with a per-task hard timeout using an isolated child process.
 
     This prevents a single stuck PDF from blocking the GPU worker forever.
@@ -161,7 +185,10 @@ def _worker_process_file(
 
         if not msg.get("ok"):
             raise RuntimeError(msg.get("error", "Unknown parse error"))
-        return {"result": msg["data"]}
+        payload = msg.get("data")
+        if isinstance(payload, list):
+            payload = {"result": payload}
+        return payload
     finally:
         if proc.is_alive():  # ensure cleanup
             proc.join(timeout=1)

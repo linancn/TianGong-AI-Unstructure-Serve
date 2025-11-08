@@ -11,6 +11,7 @@ class TextElementWithPageNum(BaseModel):
 
 class ResponseWithPageNum(BaseModel):
     result: List[TextElementWithPageNum]
+    markdown: Optional[str] = None
 
     @classmethod
     def from_result(cls, result: List[Tuple[str, int]]):

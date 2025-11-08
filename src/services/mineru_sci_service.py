@@ -4,6 +4,7 @@ import re
 from src.services.mineru_service_full import parse_doc
 
 from src.models.models import ResponseWithPageNum, TextElementWithPageNum
+from src.services.mineru_markdown import build_clean_markdown
 
 
 def clean_text(text):
@@ -98,11 +99,41 @@ def filter_references(content_list):
     return filtered_content
 
 
-def mineru_service(file_path):
-
+def mineru_service(file_path, *, return_markdown: bool = False):
     with tempfile.TemporaryDirectory() as tmp_dir:
-        content_list_content, _ = parse_doc([file_path], tmp_dir)
+        content_list_content, _, _ = parse_doc([file_path], tmp_dir)
         content_list_content = filter_references(content_list_content)
+
+        filtered_items = [
+            item
+            for item in content_list_content
+            if (
+                (item["type"] in ("text", "equation") and item.get("text", "").strip())
+                or (
+                    item["type"] == "list"
+                    and (
+                        any(text.strip() for text in item.get("list_items", []))
+                        or item.get("text", "").strip()
+                    )
+                )
+                or (
+                    item["type"] == "image"
+                    and (item.get("img_caption") or item.get("img_footnote"))
+                )
+                or (
+                    item["type"] == "table"
+                    and (
+                        item.get("table_caption")
+                        or item.get("table_body")
+                        or item.get("table_footnote")
+                    )
+                )
+            )
+        ]
+
+        markdown_text = (
+            build_clean_markdown(filtered_items) if return_markdown else None
+        )
 
         response = ResponseWithPageNum(
             result=[
@@ -118,30 +149,9 @@ def mineru_service(file_path):
                     ),
                     page_number=item["page_idx"] + 1,
                 )
-                for item in content_list_content
-                if (
-                    (item["type"] in ("text", "equation") and item.get("text", "").strip())
-                    or (
-                        item["type"] == "list"
-                        and (
-                            any(text.strip() for text in item.get("list_items", []))
-                            or item.get("text", "").strip()
-                        )
-                    )
-                    or (
-                        item["type"] == "image"
-                        and (item.get("img_caption") or item.get("img_footnote"))
-                    )
-                    or (
-                        item["type"] == "table"
-                        and (
-                            item.get("table_caption")
-                            or item.get("table_body")
-                            or item.get("table_footnote")
-                        )
-                    )
-                )
-            ]
+                for item in filtered_items
+            ],
+            markdown=markdown_text,
         )
 
         return response

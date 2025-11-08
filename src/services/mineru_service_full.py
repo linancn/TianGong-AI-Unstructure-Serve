@@ -22,6 +22,7 @@ from mineru.backend.pipeline.model_json_to_middle_json import (
 )
 from mineru.backend.vlm.vlm_middle_json_mkcontent import union_make as vlm_union_make
 from mineru.utils.models_download_utils import auto_download_and_get_model_root_path
+from src.services.mineru_markdown import build_clean_markdown
 
 
 DEFAULT_VLLM_SERVER_URL = "http://127.0.0.1:30000"
@@ -406,6 +407,7 @@ def parse_doc(
     end_page_id=None,  # End page ID for parsing, default is None (parse all pages until the end of the document)
     dump_debug_intermediate=False,  # Dump intermediate payloads for debugging
     log_debug_intermediate=False,  # Log intermediate payloads for debugging
+    return_markdown=False,  # When True, also return clean markdown composed from the content list
 ):
     """
     Parameter description:
@@ -432,6 +434,7 @@ def parse_doc(
         falling back to http://127.0.0.1:30000.
     dump_debug_intermediate: When True, writes out intermediate parsing payloads for debugging.
     log_debug_intermediate: When True, logs intermediate parsing payloads for debugging.
+    return_markdown: When True, compose and return a clean markdown string derived from parsed chunks.
     """
     try:
         file_name_list = []
@@ -456,7 +459,16 @@ def parse_doc(
             f_dump_debug_intermediate=dump_debug_intermediate,
             f_log_debug_intermediate=log_debug_intermediate,
         )
-        return response
+        if response is None:
+            return None, None, None
+
+        content_list, output_dir_path = response
+        markdown_text = (
+            build_clean_markdown(content_list)
+            if return_markdown and content_list
+            else None
+        )
+        return content_list, output_dir_path, markdown_text
     except Exception as e:
         logger.exception(e)
 
