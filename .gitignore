@@ -157,3 +157,5 @@ weaviate/weaviate_data
 .log
 
 /minio/
+
+uv.lock
