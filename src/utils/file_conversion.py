@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
 from pathlib import Path
@@ -79,12 +80,18 @@ def convert_office_document_to_pdf(input_path: str) -> Tuple[str, List[str]]:
         raise RuntimeError(f"Source file for conversion not found: {input_path}")
 
     tmp_output_dir = Path(tempfile.mkdtemp(prefix="mineru-office-", suffix="-pdf"))
+    profile_dir = Path(tempfile.mkdtemp(prefix="mineru-lo-profile-"))
     target_name = f"{src.stem}.pdf"
+    timeout_seconds = int(os.getenv("MINERU_OFFICE_CONVERT_TIMEOUT_SECONDS", "180"))
+
     cmd = [
         libreoffice,
         "--headless",
         "--nologo",
         "--nofirststartwizard",
+        "--norestore",
+        "--nolockcheck",
+        f"-env:UserInstallation={profile_dir.resolve().as_uri()}",
         "--convert-to",
         "pdf",
         "--outdir",
@@ -92,33 +99,49 @@ def convert_office_document_to_pdf(input_path: str) -> Tuple[str, List[str]]:
         str(src),
     ]
 
-    completed = subprocess.run(
+    proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        check=False,
+        start_new_session=True,
     )
 
-    if completed.returncode != 0:
+    try:
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            stdout, stderr = proc.communicate()
+            raise RuntimeError(
+                "LibreOffice conversion timed out after "
+                f"{timeout_seconds}s. "
+                f"Stdout: {stdout.strip()} Stderr: {stderr.strip()}"
+            )
+
+        if proc.returncode != 0:
+            raise RuntimeError(
+                "LibreOffice failed to convert Office document to PDF. "
+                f"Exit code: {proc.returncode}. "
+                f"Stdout: {stdout.strip()} Stderr: {stderr.strip()}"
+            )
+
+        converted_pdf = tmp_output_dir / target_name
+        if not converted_pdf.exists():
+            raise RuntimeError(
+                "LibreOffice conversion did not produce the expected PDF output file."
+            )
+
+        fd, final_path = tempfile.mkstemp(prefix="mineru-office-", suffix=".pdf")
+        os.close(fd)
+        shutil.move(converted_pdf, final_path)
+        return final_path, [final_path]
+    finally:
         shutil.rmtree(tmp_output_dir, ignore_errors=True)
-        raise RuntimeError(
-            "LibreOffice failed to convert Office document to PDF. "
-            f"Exit code: {completed.returncode}. "
-            f"Output: {completed.stderr or completed.stdout}"
-        )
-
-    converted_pdf = tmp_output_dir / target_name
-    if not converted_pdf.exists():
-        shutil.rmtree(tmp_output_dir, ignore_errors=True)
-        raise RuntimeError("LibreOffice conversion did not produce the expected PDF output file.")
-
-    fd, final_path = tempfile.mkstemp(prefix="mineru-office-", suffix=".pdf")
-    os.close(fd)
-    shutil.move(converted_pdf, final_path)
-    shutil.rmtree(tmp_output_dir, ignore_errors=True)
-
-    return final_path, [final_path]
+        shutil.rmtree(profile_dir, ignore_errors=True)
 
 
 def maybe_convert_office_to_pdf(input_path: str, extension: str) -> Tuple[str, List[str]]:

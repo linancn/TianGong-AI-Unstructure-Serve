@@ -38,6 +38,7 @@
 - 关键环境变量：  
   - `FASTAPI_AUTH` / `FASTAPI_BEARER_TOKEN`：是否开启 Bearer 鉴权及令牌值。  
   - `MINERU_*`：控制 MinerU 模型源、VLM 服务地址、任务超时时间。  
+  - `MINERU_OFFICE_CONVERT_TIMEOUT_SECONDS`：LibreOffice Office→PDF 转换超时时间（默认 180s），超时会终止转换并返回 500。  
   - `VISION_PROVIDER_CHOICES`、`VISION_MODELS_*`：视觉模型白名单。  
   - `WEAVIATE_*`：Weaviate 服务地址。  
   - `MINIO_*`：MinIO 凭证与目标桶。  
@@ -83,6 +84,7 @@
   - Pandoc 未安装或 PATH 配置错误。  
   - MinIO / Weaviate 连接参数缺失或证书配置不当。  
   - GPU 资源不足导致 MinerU 调度超时。
+- Office → PDF 转换：每次调用都会为 LibreOffice 创建独立 profile 目录，避免 `.config/libreoffice` 上的锁文件互相影响；若转换超过超时时间会强制中止并清理遗留 `soffice` 进程。
 - 从 `/weaviate/` 下的脚本可了解向量库 schema 管理方式，遇到 schema 变更需同步更新 `create_collection_if_not_exists` 默认字段。
 
 ## 协作约定
