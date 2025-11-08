@@ -31,6 +31,7 @@
   - `/gpu/status` 路由可以查询每块 GPU 的排队任务数及运行情况。
 - **视觉问答/解析**（`src/services/vision_service.py`）  
   - 统一调度 OpenAI、Gemini、vLLM 视觉大模型，按环境变量控制可用 provider、模型及凭证。
+  - 默认提示词已明确要求模型直接输出核心洞察，禁止使用“根据您提供的上下文信息”“以下是”等前置客套语。
 
 ## 配置与敏感信息
 - 所有默认配置来自 `.secrets/secrets.toml`，通过 `src/config/config.py` 读取，并允许环境变量覆盖。敏感字段包括 FASTAPI Bearer Token、OpenAI/Gemini/VLLM API Key 等。
