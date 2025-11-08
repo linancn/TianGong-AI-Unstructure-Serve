@@ -62,13 +62,14 @@
   - MinIO：参考 README 使用 `quay.io/minio/minio` 镜像。  
   - MinerU vLLM Server：`MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=0 mineru-vllm-server --port 30000`
 
-## 开发与质量保障
-- 代码格式与质量检查：  
+## 开发与质量保障：
+- 每次修改代码后，确保运行以下代码格式与质量检查的命令，确保程序质量：
   ```bash
   uv run --group dev black .
   uv run --group dev ruff check src
   uv run --group dev pytest
   ```
+- 新增的 `tests/` Pytest 测试工程覆盖配置环境变量覆盖逻辑、Markdown/文件转换工具、MinIO 封装、Pydantic 模型以及 `/health`、`/gpu/status` 等轻量路由；`tests/conftest.py` 会注入轻量替身（GPU 调度器、MinIO/pypdfium2 stub），无需真实外部依赖即可运行。
 - 代码中针对 Ruff 规则（F401/BLE001/E722 等）已统一清理未使用依赖，并将异常捕获限定在预期类型；后续新增 try/except 块时请保持同等粒度。
 - 图像增强流程的 `_log_vision_prompt` 使用 `logger.debug` 输出前后文，默认不会污染 info 级日志，如需调试可上调日志级别。
 - 建议通过 `/health` 做存活探测，`/gpu/status` 监控排队，MinIO/Weaviate 接口应配合真实服务验证。
