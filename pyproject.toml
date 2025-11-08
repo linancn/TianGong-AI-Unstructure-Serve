@@ -1,3 +1,54 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tiangong-ai-unstructure-serve"
+version = "0.1.0"
+description = "FastAPI service for TianGong AI unstructured document processing."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [
+    { name = "linancn" },
+]
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "gunicorn",
+    "pydantic",
+    "python-dotenv",
+    "toml",
+    "openai",
+    "google-genai",
+    "mineru[all]",
+    "py-zerox",
+    "unstructured[docx,pptx]",
+    "python-pptx",
+    "python-docx",
+    "pillow",
+    "beautifulsoup4",
+    "pandas",
+    "tiktoken",
+    "weaviate-client",
+    "loguru",
+    "pdf2image",
+    "tenacity",
+    "torch",
+    "protobuf",
+    "minio",
+]
+
+[dependency-groups]
+dev = [
+    "black>=25.9.0",
+    "ruff>=0.14.4",
+    "pytest>=8.4.2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
 [tool.black]
 line-length = 100
 exclude = '''

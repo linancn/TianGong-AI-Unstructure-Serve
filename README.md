@@ -3,43 +3,36 @@
 
 ## Env Preparing
 
-Setup `venv`:
+Use [uv](https://docs.astral.sh/uv/) to manage Python and project dependencies:
 
 ```bash
+# (optional) install uv if it is not available yet
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-sudo apt-get install python3.12-dev
-sudo apt-get install nvidia-cuda-toolkit
+# ensure CPython 3.12 is available locally
+uv python install 3.12
 
-python3.12 -m venv .venv
-source .venv/bin/activate
+# install all project dependencies into .venv/
+uv sync
 ```
 
-Install requirements:
+`uv sync` reads `pyproject.toml` (and `uv.lock` when present) to create a virtual environment at `.venv/`.  
+All runtime and development dependencies now live in `pyproject.toml`; the legacy requirement files are retained only for reference.
+Activate it with `source .venv/bin/activate` or prefer `uv run …` / `uv venv` for ephemeral shells.
+
+Download MinerU models (first run only):
 
 ```bash
-python.exe -m pip install --upgrade pip
-
-pip install --upgrade pip
-
-pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
-pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-pip install -r requirements.txt --upgrade
-
-pip install -r requirements_freeze.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-
-pip install torch==2.8 torchvision torchaudio -i https://pypi.tuna.tsinghua.edu.cn/simple
-  
-
 wget https://gcore.jsdelivr.net/gh/opendatalab/MinerU@master/scripts/download_models_hf.py -O download_models_hf.py
-python download_models_hf.py
-
-pip freeze > requirements_freeze.txt
+uv run python download_models_hf.py
 ```
 
-Auto lint:
+### Development helpers
+
 ```bash
-pip install black
-black .
+uv run --group dev black .
+uv run --group dev ruff check src
+uv run --group dev pytest
 ```
 
 ```bash
@@ -61,9 +54,7 @@ watch -n 1 nvidia-smi
 Start Server:
 
 ```bash
-
-
-
+# run from within the uv-managed environment (activate .venv or prefix with `uv run`)
 MINERU_MODEL_SOURCE=modelscope TABLE_OCR=paddle OCR_AGENT=unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle uvicorn src.main:app --host 0.0.0.0 --port 7770
 
 MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=0 OCR_AGENT=unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle uvicorn src.main:app --host 0.0.0.0 --port 8770
