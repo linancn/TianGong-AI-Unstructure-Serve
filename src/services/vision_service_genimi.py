@@ -12,7 +12,9 @@ _DEFAULT_PROMPT = (
     "What is in this image? Use any provided page numbers and [ChunkType=Title] markers to"
     " infer the correct page context. Base your answer primarily on the visual content; if"
     " the surrounding context conflicts with or seems unrelated to the image, ignore it and"
-    " trust what you see. Only return neat facts."
+    " trust what you see. Only return neat facts. Respond directly with the core findings—do"
+    " not add lead-in phrases such as 'Based on the context' or 'Here is the summary', and"
+    " avoid Chinese introductions like '根据您提供的上下文信息' or '以下是'."
 )
 
 
@@ -41,7 +43,8 @@ def _build_prompt(context: str, prompt_override: Optional[str]) -> str:
             "Describe what is visually present first, using the page and title cues only to"
             " clarify placement. If the text context conflicts with or seems unrelated to the"
             " visible content, explicitly prefer the image and ignore that context. Only return"
-            " neat facts in the language of the context."
+            " neat facts in the language of the context. Respond with the key details only—do not"
+            " preface the answer with meta commentary such as '根据您提供的上下文信息' or '以下是'."
         )
 
     return _DEFAULT_PROMPT
