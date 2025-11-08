@@ -55,19 +55,19 @@ Start Server:
 
 ```bash
 # run from within the uv-managed environment (activate .venv or prefix with `uv run`)
-MINERU_MODEL_SOURCE=modelscope TABLE_OCR=paddle OCR_AGENT=unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle uvicorn src.main:app --host 0.0.0.0 --port 7770
+MINERU_MODEL_SOURCE=modelscope uvicorn src.main:app --host 0.0.0.0 --port 7770
 
-MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=0 OCR_AGENT=unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle uvicorn src.main:app --host 0.0.0.0 --port 8770
-MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=1 OCR_AGENT=unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle uvicorn src.main:app --host 0.0.0.0 --port 8771
-MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=2 OCR_AGENT=unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle uvicorn src.main:app --host 0.0.0.0 --port 8772
+MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=0 uvicorn src.main:app --host 0.0.0.0 --port 8770
+MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=1 uvicorn src.main:app --host 0.0.0.0 --port 8771
+MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=2 uvicorn src.main:app --host 0.0.0.0 --port 8772
 
 # run in background
 
-nohup env MINERU_MODEL_SOURCE=modelscope TABLE_OCR=paddle OCR_AGENT=unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle uvicorn src.main:app --host 0.0.0.0 --port 7770 > uvicorn.log 2>&1 &
+nohup env MINERU_MODEL_SOURCE=modelscope uvicorn src.main:app --host 0.0.0.0 --port 7770 > uvicorn.log 2>&1 &
 
-nohup env MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=0 TABLE_OCR=paddle OCR_AGENT=unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle uvicorn src.main:app --host 0.0.0.0 --port 8770 > uvicorn.log 2>&1 &
-nohup env MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=1 TABLE_OCR=paddle OCR_AGENT=unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle uvicorn src.main:app --host 0.0.0.0 --port 8771 > uvicorn.log 2>&1 &
-nohup env MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=2 TABLE_OCR=paddle OCR_AGENT=unstructured.partition.utils.ocr_models.paddle_ocr.OCRAgentPaddle uvicorn src.main:app --host 0.0.0.0 --port 8772 > uvicorn.log 2>&1 &
+nohup env MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=0 uvicorn src.main:app --host 0.0.0.0 --port 8770 > uvicorn.log 2>&1 &
+nohup env MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=1 uvicorn src.main:app --host 0.0.0.0 --port 8771 > uvicorn.log 2>&1 &
+nohup env MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=2 uvicorn src.main:app --host 0.0.0.0 --port 8772 > uvicorn.log 2>&1 &
 
 npm i -g pm2
 
@@ -81,11 +81,9 @@ pm2 restart all
 
 pm2 status
 
-pm2 restart unstructured-gunicorn
-pm2 stop unstructured-gunicorn
-pm2 delete unstructured-gunicorn
+pm2 restart all
 
-pm2 logs unstructured-gunicorn
+pm2 status
 
 pm2 delete all
 

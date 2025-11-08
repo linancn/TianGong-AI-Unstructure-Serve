@@ -22,8 +22,6 @@ dependencies = [
     "openai",
     "google-genai",
     "mineru[all]",
-    "unstructured[docx,pptx]",
-    "python-pptx",
     "python-docx",
     "pillow",
     "beautifulsoup4",

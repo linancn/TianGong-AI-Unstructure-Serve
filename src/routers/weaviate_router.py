@@ -22,7 +22,6 @@ from src.services.minio_storage import (
     ensure_bucket,
     parse_minio_endpoint,
 )
-from src.services.docx_service import unstructure_docx
 from src.services.vision_service import (
     AVAILABLE_MODEL_VALUES,
     AVAILABLE_PROVIDER_VALUES,
@@ -30,9 +29,27 @@ from src.services.vision_service import (
     VisionProvider,
 )
 from src.services.weaviate_service import insert_text_chunks
+from src.utils.file_conversion import (
+    CONVERTIBLE_OFFICE_EXTENSIONS,
+    MARKDOWN_EXTENSIONS,
+    format_extension_list,
+    maybe_convert_to_pdf,
+)
+from src.utils.markdown_parser import parse_markdown_chunks
+from src.utils.mineru_support import (
+    format_supported_extensions,
+    mineru_supported_extensions,
+)
 from src.utils.response_utils import json_response, pretty_response_flag
 
 router = APIRouter()
+
+SUPPORTED_EXTENSIONS = mineru_supported_extensions()
+SUPPORTED_EXTENSIONS_STR = format_supported_extensions()
+OFFICE_EXTENSIONS_STR = format_extension_list(CONVERTIBLE_OFFICE_EXTENSIONS)
+MARKDOWN_EXTENSIONS_STR = format_extension_list(MARKDOWN_EXTENSIONS)
+ACCEPTED_EXTENSIONS = SUPPORTED_EXTENSIONS | CONVERTIBLE_OFFICE_EXTENSIONS | MARKDOWN_EXTENSIONS
+ACCEPTED_EXTENSIONS_STR = format_extension_list(ACCEPTED_EXTENSIONS)
 
 # Weaviate collection/class 命名规则正则
 _WEAVIATE_CLASS_RE = re.compile(r"^[A-Z][_0-9A-Za-z]*$")
@@ -217,7 +234,7 @@ def _upload_pdf_assets(
 
 @router.post(
     "/weaviate/ingest",
-    summary="Ingest parsed chunks into Weaviate (PDF via MinerU, DOCX via DOCX parser)",
+    summary="Ingest parsed chunks into Weaviate",
     response_model=InsertSummary,
     response_description="Summary of inserted chunks",
 )
@@ -239,23 +256,30 @@ async def ingest_to_weaviate(
     minio_bucket: Optional[str] = Form(None, description="Target MinIO bucket name"),
     pretty: bool = Depends(pretty_response_flag),
 ):
-    """
+    f"""
     Parse the uploaded document and insert chunks into Weaviate.
 
-    - Supported types: .pdf (MinerU), .docx (DOCX parser service)
-    - Collection name: sanitize and combine collection_name and user_id to a legal Weaviate class name
-    - tags: JSON array or comma-separated string
-    - source: original filename (with extension)
-    - Returns: number of inserted items and summary
+    - Supported types: {ACCEPTED_EXTENSIONS_STR}
+    - Office formats ({OFFICE_EXTENSIONS_STR}) auto-convert to PDF before parsing.
+    - Markdown ({MARKDOWN_EXTENSIONS_STR}) is parsed directly via regex-based chunking.
+    - Collection name: sanitize and combine `collection_name` and `user_id` into a legal Weaviate class name.
+    - tags: JSON array or comma-separated string.
+    - Returns: number of inserted items and summary.
     """
-    allowed_ext = {".pdf", ".docx"}
     filename = file.filename or "uploaded"
     _, ext = os.path.splitext(filename)
     ext = ext.lower()
-    if ext not in allowed_ext:
+
+    if not ext:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file type. Allowed: {', '.join(sorted(allowed_ext))}",
+            detail="Uploaded file must include an extension.",
+        )
+
+    if ext not in ACCEPTED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type. Allowed: {ACCEPTED_EXTENSIONS_STR}",
         )
 
     # 规范化并校验 collection 名称
@@ -282,10 +306,15 @@ async def ingest_to_weaviate(
 
     minio_context: MinioContext = None
     if save_to_minio:
-        if ext != ".pdf":
+        if ext in MARKDOWN_EXTENSIONS:
             raise HTTPException(
                 status_code=400,
-                detail="MinIO storage is only supported for PDF uploads.",
+                detail="MinIO storage is not supported for Markdown uploads.",
+            )
+        if ext not in {".pdf", *CONVERTIBLE_OFFICE_EXTENSIONS}:
+            raise HTTPException(
+                status_code=400,
+                detail="MinIO storage is only supported for PDF files or Office documents that can be converted to PDF.",
             )
         minio_context = _initialize_minio_context(
             save_to_minio,
@@ -295,54 +324,78 @@ async def ingest_to_weaviate(
             minio_bucket,
         )
 
+    file_bytes = await file.read()
+
+    if ext in MARKDOWN_EXTENSIONS:
+        text_content = file_bytes.decode("utf-8", errors="ignore")
+        items = parse_markdown_chunks(text_content, chunk_type=False)
+        chunks_with_pages = [
+            (item.text, item.page_number) for item in items if item.text and item.text.strip()
+        ]
+        summary = insert_text_chunks(
+            collection_name=safe_collection,
+            chunks_with_page=chunks_with_pages,
+            source=filename,
+            tags=parsed_tags,
+        )
+        response_model = InsertSummary(**summary)
+        return json_response(response_model, pretty)
+
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
     try:
-        tmp.write(await file.read())
+        tmp.write(file_bytes)
         tmp.flush()
         tmp_path = tmp.name
     finally:
         tmp.close()
 
-    try:
-        minio_assets_summary: Optional[MinioAssetSummary] = None
-        if ext == ".pdf":
-            # PDF：使用 MinerU，得到 (text, page) 列表
-            fut = scheduler.submit(tmp_path, pipeline="default")
-            payload = await _await_future(fut)
-            items = [
-                TextElementWithPageNum(text=it["text"], page_number=int(it["page_number"]))
-                for it in payload.get("result", [])
-            ]
-            mineru_resp = ResponseWithPageNum(result=items)
+    cleanup_paths: set[str] = {tmp_path}
+    processing_path = tmp_path
+    conversion_cleanup: List[str] = []
 
-            chunks_with_pages = [
-                (item.text, item.page_number) for item in mineru_resp.result if item.text.strip()
-            ]
-            summary = insert_text_chunks(
-                collection_name=safe_collection,
-                chunks_with_page=chunks_with_pages,
-                source=filename,
-                tags=parsed_tags,
-            )
-            if minio_context:
-                minio_assets_summary = _upload_pdf_assets(
-                    minio_context,
-                    safe_collection,
-                    filename,
-                    tmp_path,
-                    chunks_with_pages,
+    if ext in CONVERTIBLE_OFFICE_EXTENSIONS:
+        try:
+            processing_path, conversion_cleanup = maybe_convert_to_pdf(tmp_path, ext)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        cleanup_paths.update(conversion_cleanup)
+
+    cleanup_paths.add(processing_path)
+
+    try:
+        fut = scheduler.submit(processing_path, pipeline="default")
+        payload = await _await_future(fut)
+        items = [
+            TextElementWithPageNum(text=it["text"], page_number=int(it["page_number"]))
+            for it in payload.get("result", [])
+        ]
+        mineru_resp = ResponseWithPageNum(result=items)
+
+        chunks_with_pages = [
+            (item.text, item.page_number) for item in mineru_resp.result if item.text.strip()
+        ]
+        summary = insert_text_chunks(
+            collection_name=safe_collection,
+            chunks_with_page=chunks_with_pages,
+            source=filename,
+            tags=parsed_tags,
+        )
+
+        if minio_context:
+            if not processing_path.lower().endswith(".pdf"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Unexpected non-PDF processing path for MinIO upload.",
                 )
-        else:
-            # DOCX：使用 DOCX 解析服务，得到不带页码的文本列表
-            chunks: List[str] = unstructure_docx(tmp_path)
-            summary = insert_text_chunks(
-                collection_name=safe_collection,
-                chunks_with_page=chunks,
-                source=filename,
-                tags=parsed_tags,
+            minio_assets_summary = _upload_pdf_assets(
+                minio_context,
+                safe_collection,
+                filename,
+                processing_path,
+                chunks_with_pages,
             )
-        if minio_assets_summary:
             summary["minio_assets"] = minio_assets_summary.model_dump(mode="python")
+
         response_model = InsertSummary(**summary)
         return json_response(response_model, pretty)
     except HTTPException:
@@ -350,10 +403,11 @@ async def ingest_to_weaviate(
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
+        for path in cleanup_paths:
+            try:
+                os.unlink(path)
+            except Exception:
+                pass
 
 
 @router.post(
