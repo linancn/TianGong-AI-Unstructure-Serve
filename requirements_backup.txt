@@ -5,7 +5,6 @@ mineru[all]
 openai
 pdf2image
 pillow
-py-zerox
 python-dotenv
 tenacity
 tiktoken

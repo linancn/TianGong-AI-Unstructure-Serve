@@ -12,7 +12,6 @@ toml
 openai
 google-genai
 mineru[all]
-py-zerox
 
 # Document Processing
 unstructured[docx,pptx]

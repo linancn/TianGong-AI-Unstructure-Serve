@@ -10,7 +10,6 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from src.config.config import FASTAPI_AUTH, FASTAPI_BEARER_TOKEN
 from src.routers import (
     health_router,
-    omniai_router,
     docx_router,
     markdown_router,
     ppt_router,
@@ -62,7 +61,6 @@ app.add_middleware(
 )
 
 app.include_router(health_router.router)
-app.include_router(omniai_router.router)
 app.include_router(docx_router.router)
 app.include_router(markdown_router.router)
 app.include_router(ppt_router.router)
