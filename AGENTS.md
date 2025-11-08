@@ -74,6 +74,7 @@
 - 图像增强流程的 `_log_vision_prompt` 使用 `logger.debug` 输出前后文，默认不会污染 info 级日志，如需调试可上调日志级别。
 - 建议通过 `/health` 做存活探测，`/gpu/status` 监控排队，MinIO/Weaviate 接口应配合真实服务验证。
 - 解析路径经常涉及临时文件，注意及时释放；`gpu_scheduler` 已在 finally 中做清理，但新增逻辑时需保持一致。
+- VS Code 调试配置（`.vscode/launch.json` 中的 `UnstructureServe`）已关闭 `.venv/**`、`input/**`、`output/**`、`pdfs/**` 等大目录的 reload 监听，以加快首启扫描。
 
 ## 常见运维提示
 - 若端口被占用，可参考 README 中的 `lsof` + `kill` 脚本快速清理 7770/8770-8772。
