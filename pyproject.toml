@@ -29,8 +29,6 @@ dependencies = [
     "tiktoken",
     "weaviate-client",
     "loguru",
-    "pdf2image",
-    "tenacity",
     "torch",
     "protobuf",
     "minio",
