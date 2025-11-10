@@ -15,7 +15,7 @@
         "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
         "MINERU_SCI_TIMEOUT_SECONDS": "110",
         "VISION_PROVIDER": "vllm",
-        "VISION_MODELS_VLLM": "Qwen/Qwen3-VL-32B-Instruct",
+        "VISION_MODELS_VLLM": "Qwen/Qwen3-VL-30B-A3B-Instruct",
         "VISION_CONTEXT_WINDOW": "4",
         "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30000",
         "MINERU_OFFICE_CONVERT_TIMEOUT_SECONDS": "600"
