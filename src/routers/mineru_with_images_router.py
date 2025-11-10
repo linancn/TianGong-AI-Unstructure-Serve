@@ -170,7 +170,7 @@ async def mineru_with_images(
                 detail="Invalid scheduler response payload for MinerU with images.",
             )
 
-        items = []
+        ordered_chunks: list[dict] = []
         for it in result_payload:
             try:
                 text = it["text"]
@@ -180,15 +180,30 @@ async def mineru_with_images(
                     status_code=500,
                     detail=f"Malformed item returned by MinerU scheduler: {exc}",
                 )
-            items.append(
-                TextElementWithPageNum(
-                    text=text,
-                    page_number=page_number,
-                    type=it.get("type") if chunk_type else None,
-                )
+            item_type = it.get("type")
+            if not chunk_type and item_type in {"header", "footer", "page_number"}:
+                continue
+            if chunk_type and item_type == "page_number":
+                continue
+            ordered_chunks.append(
+                {
+                    "text": text,
+                    "page_number": page_number,
+                    "type": item_type,
+                }
             )
+        if chunk_type:
+            ordered_chunks.sort(key=lambda ch: (0 if ch["type"] == "header" else 1))
+        items = [
+            TextElementWithPageNum(
+                text=chunk["text"],
+                page_number=chunk["page_number"],
+                type=chunk["type"] if chunk_type else None,
+            )
+            for chunk in ordered_chunks
+        ]
         txt_text = payload.get("txt")
-        if return_txt and not txt_text:
+        if return_txt:
             txt_text = build_plain_text(items)
         response_model = ResponseWithPageNum(result=items, txt=txt_text if return_txt else None)
         return json_response(response_model, pretty)

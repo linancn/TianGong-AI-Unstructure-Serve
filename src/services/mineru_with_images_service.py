@@ -353,6 +353,18 @@ def parse_with_images(
                             chunk["type"] = "title"
                         result_items.append(chunk)
 
+            elif item["type"] in ("header", "footer"):
+                if not chunk_type:
+                    continue
+                header_txt = clean_text(item.get("text", ""))
+                if header_txt.strip():
+                    chunk = {
+                        "text": header_txt,
+                        "page_number": page_number,
+                        "type": item["type"],
+                    }
+                    result_items.append(chunk)
+
             elif item["type"] == "list":
                 list_txt = list_text(item)
                 if list_txt.strip():

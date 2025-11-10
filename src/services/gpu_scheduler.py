@@ -94,6 +94,12 @@ def _actual_parse(
                 candidate = item.get("text", "")
                 if candidate and candidate.strip():
                     text = _clean_text(candidate)
+            elif itype in ("header", "footer"):
+                if not chunk_type:
+                    continue
+                candidate = item.get("text", "")
+                if candidate and candidate.strip():
+                    text = _clean_text(candidate)
             elif itype == "list" and (
                 any(text.strip() for text in item.get("list_items", []))
                 or item.get("text", "").strip()
@@ -115,8 +121,11 @@ def _actual_parse(
                 "text": text,
                 "page_number": int(item.get("page_idx", 0)) + 1,
             }
-            if chunk_type and itype == "text" and item.get("text_level") is not None:
-                chunk["type"] = "title"
+            if chunk_type:
+                if itype == "text" and item.get("text_level") is not None:
+                    chunk["type"] = "title"
+                elif itype in ("header", "footer"):
+                    chunk["type"] = itype
             results.append(chunk)
             filtered_items.append(item)
 

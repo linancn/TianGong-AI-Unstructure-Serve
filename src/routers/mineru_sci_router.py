@@ -123,18 +123,34 @@ async def mineru(
                 status_code=504, detail=f"Parsing timeout after {PARSE_TIMEOUT}s (sci pipeline)"
             )
         # Map back into Pydantic model
+        ordered_chunks: list[dict] = []
+        for it in payload.get("result", []):
+            item_type = it.get("type")
+            if not chunk_type and item_type in {"header", "footer", "page_number"}:
+                continue
+            if chunk_type and item_type == "page_number":
+                continue
+            ordered_chunks.append(
+                {
+                    "text": it["text"],
+                    "page_number": int(it["page_number"]),
+                    "type": item_type,
+                }
+            )
+        if chunk_type:
+            ordered_chunks.sort(key=lambda ch: (0 if ch["type"] == "header" else 1))
         items = [
             TextElementWithPageNum(
-                text=it["text"],
-                page_number=int(it["page_number"]),
-                type=it.get("type") if chunk_type else None,
+                text=chunk["text"],
+                page_number=chunk["page_number"],
+                type=chunk["type"] if chunk_type else None,
             )
-            for it in payload.get("result", [])
+            for chunk in ordered_chunks
         ]
         # The sci service has its own filtering logic, which is now inside the worker.
         # We just need to reconstruct the response.
         txt_text = payload.get("txt")
-        if return_txt and not txt_text:
+        if return_txt:
             txt_text = build_plain_text(items)
         response_model = ResponseWithPageNum(result=items, txt=txt_text if return_txt else None)
         return json_response(response_model, pretty)
