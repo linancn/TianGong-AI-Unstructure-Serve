@@ -22,6 +22,7 @@
 - **Weaviate 入库**（`src/routers/weaviate_router.py`）  
   - 解析流程同 MinerU，并在需要时将 PDF、截图等资产上传至 MinIO（`upload_pdf_bundle`），随后调用 `insert_text_chunks` 将分块文本写入指定 collection。  
   - 支持根据用户与知识库名称生成合法 class 名（`build_weaviate_collection_name`），并可选择视觉模型抽取摘要。
+  - `/weaviate/ingest` 与 `/weaviate/ingest_with_images` 提供 `chunk_type` 查询参数（默认 `false`），启用后会保留 MinerU 输出的标题、页眉、页脚分块，并确保这些文本一并写入 Weaviate/MinIO。
 - **MinIO 对象操作**（`src/routers/minio_router.py`）  
   - 封装上传/下载所需的 endpoint 解析、bucket 校验与对象名规范化，所有异常以 HTTP 错误返回。  
   - 通用配置结构 `MinioConfig` 写在 `src/services/minio_storage.py`。

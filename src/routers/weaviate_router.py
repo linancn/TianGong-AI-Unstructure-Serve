@@ -4,7 +4,7 @@ import re
 import tempfile
 from typing import List, Optional, Sequence, Tuple
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from src.models.models import (
     InsertSummary,
     MinioAssetSummary,
@@ -254,6 +254,10 @@ async def ingest_to_weaviate(
     minio_access_key: Optional[str] = Form(None, description="MinIO access key"),
     minio_secret_key: Optional[str] = Form(None, description="MinIO secret key"),
     minio_bucket: Optional[str] = Form(None, description="Target MinIO bucket name"),
+    chunk_type: bool = Query(
+        False,
+        description="When true, include title/header/footer chunks in Weaviate ingestion and expose their type metadata.",
+    ),
     pretty: bool = Depends(pretty_response_flag),
 ):
     f"""
@@ -264,6 +268,7 @@ async def ingest_to_weaviate(
     - Markdown ({MARKDOWN_EXTENSIONS_STR}) is parsed directly via regex-based chunking.
     - Collection name: sanitize and combine `collection_name` and `user_id` into a legal Weaviate class name.
     - tags: JSON array or comma-separated string.
+    - chunk_type=true: keep MinerU chunk metadata and store title/header/footer text.
     - Returns: number of inserted items and summary.
     """
     filename = file.filename or "uploaded"
@@ -328,9 +333,11 @@ async def ingest_to_weaviate(
 
     if ext in MARKDOWN_EXTENSIONS:
         text_content = file_bytes.decode("utf-8", errors="ignore")
-        items = parse_markdown_chunks(text_content, chunk_type=False)
+        items = parse_markdown_chunks(text_content, chunk_type=chunk_type)
         chunks_with_pages = [
-            (item.text, item.page_number) for item in items if item.text and item.text.strip()
+            (item.text, item.page_number)
+            for item in items
+            if item.text and item.text.strip()
         ]
         summary = insert_text_chunks(
             collection_name=safe_collection,
@@ -363,16 +370,42 @@ async def ingest_to_weaviate(
     cleanup_paths.add(processing_path)
 
     try:
-        fut = scheduler.submit(processing_path, pipeline="default")
+        fut = scheduler.submit(
+            processing_path,
+            pipeline="default",
+            chunk_type=chunk_type,
+        )
         payload = await _await_future(fut)
+        ordered_chunks: List[dict] = []
+        for it in payload.get("result", []):
+            item_type = it.get("type")
+            if not chunk_type and item_type in {"header", "footer", "page_number"}:
+                continue
+            if chunk_type and item_type == "page_number":
+                continue
+            ordered_chunks.append(
+                {
+                    "text": it["text"],
+                    "page_number": int(it["page_number"]),
+                    "type": item_type,
+                }
+            )
+        if chunk_type:
+            ordered_chunks.sort(key=lambda ch: (0 if ch["type"] == "header" else 1))
         items = [
-            TextElementWithPageNum(text=it["text"], page_number=int(it["page_number"]))
-            for it in payload.get("result", [])
+            TextElementWithPageNum(
+                text=chunk["text"],
+                page_number=chunk["page_number"],
+                type=chunk["type"] if chunk_type else None,
+            )
+            for chunk in ordered_chunks
         ]
         mineru_resp = ResponseWithPageNum(result=items)
 
         chunks_with_pages = [
-            (item.text, item.page_number) for item in mineru_resp.result if item.text.strip()
+            (item.text, item.page_number)
+            for item in mineru_resp.result
+            if item.text and item.text.strip()
         ]
         summary = insert_text_chunks(
             collection_name=safe_collection,
@@ -434,6 +467,10 @@ async def ingest_to_weaviate_with_images(
     minio_access_key: Optional[str] = Form(None, description="MinIO access key"),
     minio_secret_key: Optional[str] = Form(None, description="MinIO secret key"),
     minio_bucket: Optional[str] = Form(None, description="Target MinIO bucket name"),
+    chunk_type: bool = Query(
+        False,
+        description="When true, include title/header/footer chunks in Weaviate ingestion and expose their type metadata.",
+    ),
     pretty: bool = Depends(pretty_response_flag),
 ):
     """
@@ -445,6 +482,7 @@ async def ingest_to_weaviate_with_images(
     - Collection name: sanitize and combine collection_name and user_id to a legal Weaviate class name
     - tags: JSON array or comma-separated string
     - source: original filename (with extension)
+    - chunk_type=true: keep MinerU chunk metadata and store title/header/footer text.
     - Returns: number of inserted items and summary
     """
     allowed_ext = {".pdf"}
@@ -504,16 +542,39 @@ async def ingest_to_weaviate_with_images(
             pipeline="images",
             vision_provider=provider,
             vision_model=model,
+            chunk_type=chunk_type,
         )
         payload = await _await_future(fut)
+        ordered_chunks: List[dict] = []
+        for it in payload.get("result", []):
+            item_type = it.get("type")
+            if not chunk_type and item_type in {"header", "footer", "page_number"}:
+                continue
+            if chunk_type and item_type == "page_number":
+                continue
+            ordered_chunks.append(
+                {
+                    "text": it["text"],
+                    "page_number": int(it["page_number"]),
+                    "type": item_type,
+                }
+            )
+        if chunk_type:
+            ordered_chunks.sort(key=lambda ch: (0 if ch["type"] == "header" else 1))
         items = [
-            TextElementWithPageNum(text=it["text"], page_number=int(it["page_number"]))
-            for it in payload.get("result", [])
+            TextElementWithPageNum(
+                text=chunk["text"],
+                page_number=chunk["page_number"],
+                type=chunk["type"] if chunk_type else None,
+            )
+            for chunk in ordered_chunks
         ]
         mineru_resp = ResponseWithPageNum(result=items)
 
         chunks_with_pages = [
-            (item.text, item.page_number) for item in mineru_resp.result if item.text.strip()
+            (item.text, item.page_number)
+            for item in mineru_resp.result
+            if item.text and item.text.strip()
         ]
         summary = insert_text_chunks(
             collection_name=safe_collection,
