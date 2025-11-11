@@ -9,9 +9,23 @@ class TextElementWithPageNum(BaseModel):
     type: Optional[str] = None
 
 
+class MinioPageImage(BaseModel):
+    page_number: int
+    object_name: str
+
+
+class MinioAssetSummary(BaseModel):
+    bucket: str
+    prefix: Optional[str] = None
+    pdf_object: str
+    json_object: str
+    page_images: List[MinioPageImage]
+
+
 class ResponseWithPageNum(BaseModel):
     result: List[TextElementWithPageNum]
     txt: Optional[str] = None
+    minio_assets: Optional[MinioAssetSummary] = None
 
     @classmethod
     def from_result(cls, result: List[Tuple[str, int]]):
@@ -30,19 +44,6 @@ class ResponseWithoutPageNum(BaseModel):
     def from_result(cls, result: List[Tuple[str, int]]):
         items = [TextElementWithoutPageNum(text=item) for item in result]
         return cls(result=items)
-
-
-class MinioPageImage(BaseModel):
-    page_number: int
-    object_name: str
-
-
-class MinioAssetSummary(BaseModel):
-    bucket: str
-    prefix: Optional[str] = None
-    pdf_object: str
-    json_object: str
-    page_images: List[MinioPageImage]
 
 
 class InsertSummary(BaseModel):

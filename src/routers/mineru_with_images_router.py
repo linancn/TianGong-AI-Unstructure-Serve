@@ -1,11 +1,26 @@
 import os
+import re
 import tempfile
-from typing import Optional
+from typing import Optional, Sequence, Tuple
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
-from src.models.models import ResponseWithPageNum, TextElementWithPageNum
+from src.models.models import (
+    MinioAssetSummary,
+    MinioPageImage,
+    ResponseWithPageNum,
+    TextElementWithPageNum,
+)
 from src.services.gpu_scheduler import scheduler
+from src.services.minio_storage import (
+    MinioConfig,
+    MinioStorageError,
+    clear_prefix,
+    create_client,
+    ensure_bucket,
+    parse_minio_endpoint,
+    upload_pdf_bundle,
+)
 from src.services.vision_service import (
     AVAILABLE_MODEL_VALUES,
     AVAILABLE_PROVIDER_VALUES,
@@ -34,6 +49,125 @@ OFFICE_EXTENSIONS_STR = format_extension_list(CONVERTIBLE_OFFICE_EXTENSIONS)
 MARKDOWN_EXTENSIONS_STR = format_extension_list(MARKDOWN_EXTENSIONS)
 ACCEPTED_EXTENSIONS = SUPPORTED_EXTENSIONS | CONVERTIBLE_OFFICE_EXTENSIONS | MARKDOWN_EXTENSIONS
 ACCEPTED_EXTENSIONS_STR = format_extension_list(ACCEPTED_EXTENSIONS)
+MINIO_PREFIX_ROOT = "mineru"
+
+MinioContext = Optional[Tuple[MinioConfig, object]]
+
+
+def _initialize_minio_context(
+    save_to_minio: bool,
+    address: Optional[str],
+    access_key: Optional[str],
+    secret_key: Optional[str],
+    bucket: Optional[str],
+) -> MinioContext:
+    if not save_to_minio:
+        return None
+
+    required = {
+        "minio_address": address,
+        "minio_access_key": access_key,
+        "minio_secret_key": secret_key,
+        "minio_bucket": bucket,
+    }
+    missing = [key for key, value in required.items() if not value or not value.strip()]
+    if missing:
+        joined = ", ".join(missing)
+        raise HTTPException(status_code=400, detail=f"Missing MinIO field(s): {joined}")
+
+    assert address is not None  # for mypy
+    assert access_key is not None
+    assert secret_key is not None
+    assert bucket is not None
+
+    try:
+        endpoint, secure = parse_minio_endpoint(address)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    cfg = MinioConfig(
+        endpoint=endpoint,
+        access_key=access_key.strip(),
+        secret_key=secret_key.strip(),
+        bucket=bucket.strip(),
+        secure=secure,
+    )
+
+    try:
+        client = create_client(cfg)
+        ensure_bucket(client, cfg.bucket)
+    except MinioStorageError as exc:
+        raise HTTPException(
+            status_code=400, detail=f"Failed to prepare MinIO bucket: {exc}"
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=400, detail=f"Failed to initialize MinIO client: {exc}"
+        ) from exc
+
+    return cfg, client
+
+
+def _normalize_prefix_component(raw: str) -> str:
+    cleaned = re.sub(r"[^0-9A-Za-z/_-]+", "_", raw).strip("/_")
+    return cleaned
+
+
+def _build_minio_prefix(filename: str, custom_prefix: Optional[str]) -> str:
+    base = os.path.splitext(os.path.basename(filename))[0]
+    base_clean = _normalize_prefix_component(base) or "document"
+
+    if custom_prefix:
+        custom_clean = _normalize_prefix_component(custom_prefix)
+        if custom_clean:
+            return f"{custom_clean}/{base_clean}"
+
+    return f"{MINIO_PREFIX_ROOT}/{base_clean}"
+
+
+def _upload_pdf_assets(
+    ctx: MinioContext,
+    prefix: str,
+    pdf_path: str,
+    chunks_with_pages: Sequence[Tuple[str, int]],
+) -> MinioAssetSummary:
+    if ctx is None:
+        raise RuntimeError("MinIO context is required to upload assets.")
+    cfg, client = ctx
+
+    try:
+        clear_prefix(client, cfg.bucket, prefix)
+    except MinioStorageError as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to clear existing MinIO objects: {exc}"
+        ) from exc
+
+    payload_for_json = [
+        {"text": text, "page_number": page_number} for text, page_number in chunks_with_pages
+    ]
+    try:
+        record = upload_pdf_bundle(
+            client,
+            cfg=cfg,
+            prefix=prefix,
+            pdf_path=pdf_path,
+            parsed_payload=payload_for_json,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500, detail=f"Failed to upload assets to MinIO: {exc}"
+        ) from exc
+
+    return MinioAssetSummary(
+        bucket=record.bucket,
+        prefix=record.prefix,
+        pdf_object=record.pdf_object,
+        json_object=record.json_object,
+        page_images=[
+            MinioPageImage(page_number=page, object_name=obj_name)
+            for page, obj_name in record.page_images
+        ],
+    )
 
 
 def _form_provider(
@@ -89,6 +223,20 @@ async def mineru_with_images(
         None,
         description="Optional instruction prompt override passed to the vision model.",
     ),
+    save_to_minio: bool = Form(
+        False,
+        description="Store the parsed PDF, JSON payload, and per-page images in MinIO.",
+    ),
+    minio_address: Optional[str] = Form(
+        None, description="MinIO server address, e.g. https://minio.local:9000"
+    ),
+    minio_access_key: Optional[str] = Form(None, description="MinIO access key"),
+    minio_secret_key: Optional[str] = Form(None, description="MinIO secret key"),
+    minio_bucket: Optional[str] = Form(None, description="Target MinIO bucket name"),
+    minio_prefix: Optional[str] = Form(
+        None,
+        description="Optional custom prefix for stored assets; defaults to mineru/<filename>.",
+    ),
     pretty: bool = Depends(pretty_response_flag),
     chunk_type: bool = False,
     return_txt: bool = False,
@@ -99,6 +247,7 @@ async def mineru_with_images(
     Accepted: {ACCEPTED_EXTENSIONS_STR}
     Office formats ({OFFICE_EXTENSIONS_STR}) auto-convert to PDF before parsing.
     Markdown ({MARKDOWN_EXTENSIONS_STR}) is parsed directly via regex-based chunking.
+    Optional: set save_to_minio=true with credentials to upload the PDF, parsed JSON, and page images.
     Output: [(text, page_number), ...]
     """
     filename = file.filename or ""
@@ -116,6 +265,12 @@ async def mineru_with_images(
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported file type. Allowed types: {ACCEPTED_EXTENSIONS_STR}",
+        )
+
+    if save_to_minio and file_ext in MARKDOWN_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail="MinIO storage is not supported for Markdown uploads.",
         )
 
     file_bytes = await file.read()
@@ -152,6 +307,23 @@ async def mineru_with_images(
     cleanup_paths = {tmp_path, *conversion_cleanup}
 
     try:
+        minio_context: MinioContext = None
+        minio_prefix_value: Optional[str] = None
+        if save_to_minio:
+            if not processing_path.lower().endswith(".pdf"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="MinIO storage requires a PDF input after preprocessing.",
+                )
+            minio_context = _initialize_minio_context(
+                save_to_minio,
+                minio_address,
+                minio_access_key,
+                minio_secret_key,
+                minio_bucket,
+            )
+            minio_prefix_value = _build_minio_prefix(filename, minio_prefix)
+
         # Dispatch to GPU scheduler; this returns a Future
         fut = scheduler.submit(
             processing_path,
@@ -205,8 +377,26 @@ async def mineru_with_images(
         txt_text = payload.get("txt")
         if return_txt:
             txt_text = build_plain_text(items)
-        response_model = ResponseWithPageNum(result=items, txt=txt_text if return_txt else None)
+        chunks_with_pages = [
+            (item.text, item.page_number) for item in items if item.text and item.text.strip()
+        ]
+        minio_assets_summary: Optional[MinioAssetSummary] = None
+        if minio_context:
+            assert minio_prefix_value is not None  # for mypy
+            minio_assets_summary = _upload_pdf_assets(
+                minio_context,
+                minio_prefix_value,
+                processing_path,
+                chunks_with_pages,
+            )
+        response_model = ResponseWithPageNum(
+            result=items,
+            txt=txt_text if return_txt else None,
+            minio_assets=minio_assets_summary,
+        )
         return json_response(response_model, pretty)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:

@@ -257,9 +257,7 @@ async def upload_minio_file_base64(
     try:
         data = base64.b64decode(file_base64, validate=True)
     except (binascii.Error, ValueError) as exc:
-        raise HTTPException(
-            status_code=400, detail="Invalid base64-encoded file content."
-        ) from exc
+        raise HTTPException(status_code=400, detail="Invalid base64-encoded file content.") from exc
 
     return _upload_data_to_minio(
         collection_name=collection_name,
