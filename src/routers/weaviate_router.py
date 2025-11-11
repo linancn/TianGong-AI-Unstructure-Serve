@@ -335,9 +335,7 @@ async def ingest_to_weaviate(
         text_content = file_bytes.decode("utf-8", errors="ignore")
         items = parse_markdown_chunks(text_content, chunk_type=chunk_type)
         chunks_with_pages = [
-            (item.text, item.page_number)
-            for item in items
-            if item.text and item.text.strip()
+            (item.text, item.page_number) for item in items if item.text and item.text.strip()
         ]
         summary = insert_text_chunks(
             collection_name=safe_collection,

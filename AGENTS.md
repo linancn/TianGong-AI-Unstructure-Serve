@@ -26,6 +26,7 @@
   - `/weaviate/ingest` 与 `/weaviate/ingest_with_images` 提供 `chunk_type` 查询参数（默认 `false`），启用后会保留 MinerU 输出的标题、页眉、页脚分块，并确保这些文本一并写入 Weaviate/MinIO。
 - **MinIO 对象操作**（`src/routers/minio_router.py`）  
   - 封装上传/下载所需的 endpoint 解析、bucket 校验与对象名规范化，所有异常以 HTTP 错误返回。  
+  - `/minio/upload` 现要求前端以 `file_base64` 表单字段提交 Base64 编码内容，可选传递 `content_type_override` 指定 MIME；服务端会在解码失败或内容为空时返回 400。  
   - 通用配置结构 `MinioConfig` 写在 `src/services/minio_storage.py`。
 - **Markdown 工具链**（`src/routers/markdown_router.py` & `src/services/markdown_service.py`）  
   - 允许上传 Markdown 文本和可选的 reference DOCX 模板，将内容转换为 DOCX 并按需清理文档样式（依赖 Pandoc 与 python-docx）。

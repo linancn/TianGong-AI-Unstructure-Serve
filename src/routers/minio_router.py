@@ -1,8 +1,10 @@
+import base64
+import binascii
 import mimetypes
 import os
-from typing import Tuple
+from typing import Optional, Tuple
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Form, HTTPException
 from fastapi.responses import StreamingResponse
 
 from src.routers.weaviate_router import build_weaviate_collection_name
@@ -151,7 +153,10 @@ async def upload_minio_file(
     object_path: str = Form(
         ..., description="Path where the object will be stored (relative to the collection)"
     ),
-    file: UploadFile = File(..., description="Binary file to upload"),
+    file_base64: str = Form(..., description="Base64-encoded file content"),
+    content_type_override: Optional[str] = Form(
+        None, description="Explicit content type for the uploaded file"
+    ),
 ):
     try:
         safe_collection = build_weaviate_collection_name(collection_name, user_id)
@@ -167,14 +172,16 @@ async def upload_minio_file(
 
     object_name = _build_object_name(safe_collection, object_path)
 
-    data = await file.read()
-    if data is None:
-        raise HTTPException(status_code=400, detail="Failed to read uploaded file.")
+    try:
+        data = base64.b64decode(file_base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid base64-encoded file content.") from exc
+
+    if not data:
+        raise HTTPException(status_code=400, detail="Decoded file content is empty.")
 
     content_type = (
-        file.content_type
-        or mimetypes.guess_type(file.filename or object_name)[0]
-        or "application/octet-stream"
+        content_type_override or mimetypes.guess_type(object_name)[0] or "application/octet-stream"
     )
 
     try:
