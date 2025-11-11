@@ -33,6 +33,10 @@ if not root_logger.handlers:
     handler.setFormatter(formatter)
     root_logger.addHandler(handler)
 
+# 降低 httpx/httpcore 日志等级以避免打印请求细节
+for noisy_logger in ("httpx", "httpcore"):
+    logging.getLogger(noisy_logger).setLevel(logging.WARNING)
+
 bearer_scheme = HTTPBearer()
 
 

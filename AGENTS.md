@@ -5,6 +5,7 @@
 - 主入口在 `src/main.py`，通过依赖注入决定是否开启 Bearer Token 鉴权，并集中挂载各类路由（健康检查、GPU 调度、MinerU 解析、Markdown 转 DOCX、MinIO 上传下载、Weaviate 入库等）。
 - GPU 解析任务由自研调度器 `src/services/gpu_scheduler.py` 进行统一排队、超时控制和多进程执行，保障 MinerU 解析稳定性。
 - 视觉模型封装在 `src/services/vision_service.py`，按环境变量动态选择 OpenAI、Gemini 或 vLLM 服务，并对模型列表、默认模型及凭证做运行时校验。
+- `src/main.py` 初始化根日志记录器为 INFO，并将 `httpx`/`httpcore` 日志级别降至 WARNING，避免打印请求详情。
 
 ## 目录速览
 - `src/routers/`：各业务路由。`mineru_router.py`/`mineru_sci_router.py`/`mineru_with_images_router.py` 针对不同解析流程，`markdown_router.py` 负责 Markdown→DOCX，`minio_router.py` 负责对象存储操作，`weaviate_router.py` 负责文档入库，`gpu_router.py` 暴露调度状态，`health_router.py` 提供健康检查。
