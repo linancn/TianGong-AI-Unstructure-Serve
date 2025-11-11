@@ -4,7 +4,7 @@ import mimetypes
 import os
 from typing import Optional, Tuple
 
-from fastapi import APIRouter, Form, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from src.routers.weaviate_router import build_weaviate_collection_name
@@ -136,6 +136,65 @@ async def download_minio_file(
     return StreamingResponse(stream, media_type=media_type, headers=headers)
 
 
+def _upload_data_to_minio(
+    *,
+    collection_name: str,
+    user_id: str,
+    minio_address: str,
+    minio_access_key: str,
+    minio_secret_key: str,
+    minio_bucket: str,
+    object_path: str,
+    data: bytes,
+    content_type: Optional[str],
+    filename_hint: Optional[str],
+):
+    if not data:
+        raise HTTPException(status_code=400, detail="File content must not be empty.")
+
+    try:
+        safe_collection = build_weaviate_collection_name(collection_name, user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    cfg, client = _create_minio_context(
+        minio_address,
+        minio_access_key,
+        minio_secret_key,
+        minio_bucket,
+    )
+
+    object_name = _build_object_name(safe_collection, object_path)
+
+    resolved_content_type = (
+        content_type
+        or mimetypes.guess_type(filename_hint or object_name)[0]
+        or "application/octet-stream"
+    )
+
+    try:
+        upload_bytes(
+            client,
+            cfg.bucket,
+            object_name,
+            data,
+            content_type=resolved_content_type,
+        )
+    except MinioStorageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500, detail=f"Failed to upload MinIO object: {exc}"
+        ) from exc
+
+    return {
+        "bucket": cfg.bucket,
+        "object_name": object_name,
+        "size": len(data),
+        "content_type": resolved_content_type,
+    }
+
+
 @router.post(
     "/minio/upload",
     summary="Upload an object to MinIO",
@@ -153,55 +212,64 @@ async def upload_minio_file(
     object_path: str = Form(
         ..., description="Path where the object will be stored (relative to the collection)"
     ),
+    file: UploadFile = File(..., description="Binary file to upload"),
+):
+    data = await file.read()
+    if data is None:
+        raise HTTPException(status_code=400, detail="Failed to read uploaded file.")
+
+    return _upload_data_to_minio(
+        collection_name=collection_name,
+        user_id=user_id,
+        minio_address=minio_address,
+        minio_access_key=minio_access_key,
+        minio_secret_key=minio_secret_key,
+        minio_bucket=minio_bucket,
+        object_path=object_path,
+        data=data,
+        content_type=file.content_type,
+        filename_hint=file.filename,
+    )
+
+
+@router.post(
+    "/minio/upload/base64",
+    summary="Upload an object to MinIO via Base64 payload",
+    response_description="Metadata about the stored object",
+)
+async def upload_minio_file_base64(
+    collection_name: str = Form(...),
+    user_id: str = Form(...),
+    minio_address: str = Form(
+        ..., description="MinIO server address, e.g. https://minio.local:9000"
+    ),
+    minio_access_key: str = Form(..., description="MinIO access key"),
+    minio_secret_key: str = Form(..., description="MinIO secret key"),
+    minio_bucket: str = Form(..., description="Target MinIO bucket name"),
+    object_path: str = Form(
+        ..., description="Path where the object will be stored (relative to the collection)"
+    ),
     file_base64: str = Form(..., description="Base64-encoded file content"),
     content_type_override: Optional[str] = Form(
         None, description="Explicit content type for the uploaded file"
     ),
 ):
     try:
-        safe_collection = build_weaviate_collection_name(collection_name, user_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    cfg, client = _create_minio_context(
-        minio_address,
-        minio_access_key,
-        minio_secret_key,
-        minio_bucket,
-    )
-
-    object_name = _build_object_name(safe_collection, object_path)
-
-    try:
         data = base64.b64decode(file_base64, validate=True)
     except (binascii.Error, ValueError) as exc:
-        raise HTTPException(status_code=400, detail="Invalid base64-encoded file content.") from exc
-
-    if not data:
-        raise HTTPException(status_code=400, detail="Decoded file content is empty.")
-
-    content_type = (
-        content_type_override or mimetypes.guess_type(object_name)[0] or "application/octet-stream"
-    )
-
-    try:
-        upload_bytes(
-            client,
-            cfg.bucket,
-            object_name,
-            data,
-            content_type=content_type,
-        )
-    except MinioStorageError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001
         raise HTTPException(
-            status_code=500, detail=f"Failed to upload MinIO object: {exc}"
+            status_code=400, detail="Invalid base64-encoded file content."
         ) from exc
 
-    return {
-        "bucket": cfg.bucket,
-        "object_name": object_name,
-        "size": len(data),
-        "content_type": content_type,
-    }
+    return _upload_data_to_minio(
+        collection_name=collection_name,
+        user_id=user_id,
+        minio_address=minio_address,
+        minio_access_key=minio_access_key,
+        minio_secret_key=minio_secret_key,
+        minio_bucket=minio_bucket,
+        object_path=object_path,
+        data=data,
+        content_type=content_type_override,
+        filename_hint=None,
+    )
