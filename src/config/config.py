@@ -38,4 +38,6 @@ OPENAI_API_KEY = config["OPENAI"]["API_KEY"]
 GENIMI_API_KEY = config["GOOGLE"]["API_KEY"]
 
 VLLM_API_KEY = _env_override("VLLM_API_KEY", config["VLLM"]["API_KEY"])
-VLLM_BASE_URL = _env_override("VLLM_BASE_URL", config["VLLM"].get("BASE_URL"))
+_VLLM_BASE_URL_DEFAULT = config["VLLM"].get("BASE_URL") or config["VLLM"].get("BASE_URLS")
+VLLM_BASE_URL = _env_override("VLLM_BASE_URL", _VLLM_BASE_URL_DEFAULT)
+VLLM_BASE_URLS = _env_override("VLLM_BASE_URLS", config["VLLM"].get("BASE_URLS"))

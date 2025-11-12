@@ -1,9 +1,14 @@
 import importlib
 import sys
+from typing import Optional, Dict, Any
 
 
-def _reload_config(monkeypatch, env_overrides=None):
-    config_data = {
+def _reload_config(
+    monkeypatch,
+    env_overrides: Optional[Dict[str, Optional[str]]] = None,
+    config_override: Optional[Dict[str, Any]] = None,
+):
+    config_data = config_override or {
         "FASTAPI": {
             "AUTH": True,
             "BEARER_TOKEN": "token",
@@ -45,3 +50,22 @@ def test_vllm_env_override_trims(monkeypatch):
     assert module.VLLM_API_KEY == "override-key"
     # When env provides blank string, fallback to TOML value
     assert module.VLLM_BASE_URL == "http://default"
+
+
+def test_vllm_base_urls_from_toml(monkeypatch):
+    config_override = {
+        "FASTAPI": {
+            "AUTH": True,
+            "BEARER_TOKEN": "token",
+            "MIDDLEWARE_SECRECT_KEY": "middleware",
+        },
+        "OPENAI": {"API_KEY": "openai-key"},
+        "GOOGLE": {"API_KEY": "google-key"},
+        "VLLM": {
+            "API_KEY": "",
+            "BASE_URLS": "http://one/v1/, http://two/v1/",
+        },
+    }
+    module = _reload_config(monkeypatch, env_overrides={}, config_override=config_override)
+    assert module.VLLM_BASE_URL == "http://one/v1/, http://two/v1/"
+    assert module.VLLM_BASE_URLS == "http://one/v1/, http://two/v1/"

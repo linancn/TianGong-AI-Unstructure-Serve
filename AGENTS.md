@@ -37,6 +37,7 @@
 - **视觉问答/解析**（`src/services/vision_service.py`）  
   - 统一调度 OpenAI、Gemini、vLLM 视觉大模型，按环境变量控制可用 provider、模型及凭证。
   - 默认提示词已明确要求模型直接输出核心洞察，禁止使用“根据您提供的上下文信息”“以下是”等前置客套语。
+  - vLLM 客户端支持通过 `VLLM_BASE_URLS` 或逗号分隔的 `VLLM_BASE_URL` 配置多个后端，请求按轮询方式分发以平衡图片识别负载。
 
 ## 配置与敏感信息
 - 所有默认配置来自 `.secrets/secrets.toml`，通过 `src/config/config.py` 读取，并允许环境变量覆盖。敏感字段包括 FASTAPI Bearer Token、OpenAI/Gemini/VLLM API Key 等。
@@ -45,6 +46,7 @@
   - `MINERU_*`：控制 MinerU 模型源、VLM 服务地址、任务超时时间。  
   - `MINERU_OFFICE_CONVERT_TIMEOUT_SECONDS`：LibreOffice Office→PDF 转换超时时间（默认 180s），超时会终止转换并返回 500。  
   - `VISION_PROVIDER_CHOICES`、`VISION_MODELS_*`：视觉模型白名单。  
+  - `VLLM_BASE_URL` / `VLLM_BASE_URLS`：指定 vLLM 视觉服务地址，支持逗号分隔配置多实例，按轮询方式调用（`.secrets/secrets.toml` 支持 `BASE_URL` 与 `BASE_URLS` 两种字段）。  
   - `WEAVIATE_*`：Weaviate 服务地址。  
   - `MINIO_*`：MinIO 凭证与目标桶。  
   - `CUDA_VISIBLE_DEVICES`：运行时显卡绑定。

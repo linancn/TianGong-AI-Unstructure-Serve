@@ -1,10 +1,12 @@
 import base64
 import os
-from typing import Optional
+from itertools import cycle
+from threading import Lock
+from typing import Iterator, List, Optional
 
 from openai import OpenAI
 
-from src.config.config import VLLM_API_KEY, VLLM_BASE_URL
+from src.config.config import VLLM_API_KEY, VLLM_BASE_URL, VLLM_BASE_URLS
 
 DEFAULT_VISION_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct"
 _FALLBACK_API_KEY = "not-required"
@@ -27,13 +29,22 @@ def _resolve_api_key() -> str:
     return _FALLBACK_API_KEY
 
 
-def _resolve_base_url() -> Optional[str]:
-    env_override = os.getenv("VLLM_BASE_URL")
-    if env_override and env_override.strip():
-        return env_override.strip()
-    if VLLM_BASE_URL and VLLM_BASE_URL.strip():
-        return VLLM_BASE_URL.strip()
-    return None
+def _parse_base_urls(raw_value: Optional[str]) -> List[str]:
+    if not raw_value:
+        return []
+    parts = [item.strip() for item in raw_value.split(",")]
+    return [item for item in parts if item]
+
+
+def _resolve_base_urls() -> List[str]:
+    env_override = os.getenv("VLLM_BASE_URLS") or os.getenv("VLLM_BASE_URL")
+    urls = _parse_base_urls(env_override)
+    if urls:
+        return urls
+    urls = _parse_base_urls(VLLM_BASE_URLS)
+    if urls:
+        return urls
+    return _parse_base_urls(VLLM_BASE_URL)
 
 
 def _has_configured_api_key() -> bool:
@@ -46,15 +57,23 @@ def _has_configured_api_key() -> bool:
 
 
 def has_vllm_credentials() -> bool:
-    return bool(_resolve_base_url() or _has_configured_api_key())
+    return bool(_resolve_base_urls() or _has_configured_api_key())
 
 
-_client: Optional[OpenAI] = None
-_base_url = _resolve_base_url()
-if _base_url:
-    _client = OpenAI(api_key=_resolve_api_key(), base_url=_base_url)
-elif _has_configured_api_key():
-    _client = OpenAI(api_key=_resolve_api_key())
+def _build_clients() -> List[OpenAI]:
+    base_urls = _resolve_base_urls()
+    api_key = _resolve_api_key()
+    if base_urls:
+        return [OpenAI(api_key=api_key, base_url=url) for url in base_urls]
+    if _has_configured_api_key():
+        return [OpenAI(api_key=api_key)]
+    return []
+
+
+_CLIENTS: List[OpenAI] = _build_clients()
+_CLIENT_LOCK = Lock()
+_CLIENT_CYCLE: Optional[Iterator[OpenAI]] = cycle(_CLIENTS) if len(_CLIENTS) > 1 else None
+_CLIENT_SINGLE: Optional[OpenAI] = _CLIENTS[0] if len(_CLIENTS) == 1 else None
 
 
 # Function to encode the image
@@ -70,11 +89,14 @@ def _resolve_model(explicit: Optional[str] = None) -> str:
 
 
 def _get_client() -> OpenAI:
-    if _client is None:
-        raise RuntimeError(
-            "vLLM vision client is not configured. Set VLLM_BASE_URL or VLLM_API_KEY."
-        )
-    return _client
+    if _CLIENT_SINGLE:
+        return _CLIENT_SINGLE
+    if _CLIENT_CYCLE is not None:
+        with _CLIENT_LOCK:
+            return next(_CLIENT_CYCLE)
+    raise RuntimeError(
+        "vLLM vision client is not configured. Set VLLM_BASE_URLS / VLLM_BASE_URL (comma-separated) or VLLM_API_KEY."
+    )
 
 
 def _build_prompt(context: str, prompt_override: Optional[str]) -> str:
