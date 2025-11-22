@@ -40,6 +40,8 @@ OFFICE_EXTENSIONS_STR = format_extension_list(CONVERTIBLE_OFFICE_EXTENSIONS)
 MARKDOWN_EXTENSIONS_STR = format_extension_list(MARKDOWN_EXTENSIONS)
 ACCEPTED_EXTENSIONS = SUPPORTED_EXTENSIONS | CONVERTIBLE_OFFICE_EXTENSIONS | MARKDOWN_EXTENSIONS
 ACCEPTED_EXTENSIONS_STR = format_extension_list(ACCEPTED_EXTENSIONS)
+
+
 def _form_provider(
     provider: Optional[str] = Form(
         None,
@@ -248,7 +250,9 @@ async def mineru_with_images(
         if return_txt:
             txt_text = build_plain_text(items)
         chunks_with_pages = [
-            (item.text, item.page_number) for item in items if item.text and item.text.strip()
+            (item.text, item.page_number, item.type)
+            for item in items
+            if item.text and item.text.strip()
         ]
         minio_assets_summary: Optional[MinioAssetSummary] = None
         if minio_context:

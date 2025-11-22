@@ -188,7 +188,7 @@ async def mineru(
         if minio_context:
             assert minio_prefix_value is not None  # for mypy
             chunks_with_pages = [
-                (item.text, item.page_number)
+                (item.text, item.page_number, item.type)
                 for item in items
                 if item.text and item.text.strip()
             ]

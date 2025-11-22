@@ -62,9 +62,13 @@ def initialize_minio_context(
         client = create_client(cfg)
         ensure_bucket(client, cfg.bucket)
     except MinioStorageError as exc:
-        raise HTTPException(status_code=400, detail=f"Failed to prepare MinIO bucket: {exc}") from exc
+        raise HTTPException(
+            status_code=400, detail=f"Failed to prepare MinIO bucket: {exc}"
+        ) from exc
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=f"Failed to initialize MinIO client: {exc}") from exc
+        raise HTTPException(
+            status_code=400, detail=f"Failed to initialize MinIO client: {exc}"
+        ) from exc
 
     return cfg, client
 
@@ -90,7 +94,7 @@ def upload_pdf_assets(
     ctx: MinioContext,
     prefix: str,
     pdf_path: str,
-    chunks_with_pages: Sequence[Tuple[str, int]],
+    chunks_with_pages: Sequence[Tuple[str, int, Optional[str]]],
 ) -> MinioAssetSummary:
     if ctx is None:
         raise RuntimeError("MinIO context is required to upload assets.")
@@ -99,11 +103,16 @@ def upload_pdf_assets(
     try:
         clear_prefix(client, cfg.bucket, prefix)
     except MinioStorageError as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to clear existing MinIO objects: {exc}") from exc
+        raise HTTPException(
+            status_code=500, detail=f"Failed to clear existing MinIO objects: {exc}"
+        ) from exc
 
-    payload_for_json = [
-        {"text": text, "page_number": page_number} for text, page_number in chunks_with_pages
-    ]
+    payload_for_json = []
+    for text, page_number, element_type in chunks_with_pages:
+        payload_entry = {"text": text, "page_number": page_number}
+        if element_type:
+            payload_entry["type"] = element_type
+        payload_for_json.append(payload_entry)
     try:
         record = upload_pdf_bundle(
             client,
@@ -113,7 +122,9 @@ def upload_pdf_assets(
             parsed_payload=payload_for_json,
         )
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"Failed to upload assets to MinIO: {exc}") from exc
+        raise HTTPException(
+            status_code=500, detail=f"Failed to upload assets to MinIO: {exc}"
+        ) from exc
 
     return MinioAssetSummary(
         bucket=record.bucket,
