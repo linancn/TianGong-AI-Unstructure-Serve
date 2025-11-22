@@ -1,9 +1,16 @@
 import os
 import tempfile
+from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
-from src.models.models import ResponseWithPageNum, TextElementWithPageNum
+from src.models.models import MinioAssetSummary, ResponseWithPageNum, TextElementWithPageNum
+from src.routers.mineru_minio_utils import (
+    MinioContext,
+    build_minio_prefix,
+    initialize_minio_context,
+    upload_pdf_assets,
+)
 from src.services.gpu_scheduler import scheduler
 from src.utils.file_conversion import (
     CONVERTIBLE_OFFICE_EXTENSIONS,
@@ -42,6 +49,20 @@ ACCEPTED_EXTENSIONS_STR = format_extension_list(ACCEPTED_EXTENSIONS)
 )
 async def mineru(
     file: UploadFile = File(...),
+    save_to_minio: bool = Form(
+        False,
+        description="Store the parsed PDF, JSON payload, and per-page images in MinIO.",
+    ),
+    minio_address: Optional[str] = Form(
+        None, description="MinIO server address, e.g. https://minio.local:9000"
+    ),
+    minio_access_key: Optional[str] = Form(None, description="MinIO access key"),
+    minio_secret_key: Optional[str] = Form(None, description="MinIO secret key"),
+    minio_bucket: Optional[str] = Form(None, description="Target MinIO bucket name"),
+    minio_prefix: Optional[str] = Form(
+        None,
+        description="Optional custom prefix for stored assets; defaults to mineru/<filename>.",
+    ),
     pretty: bool = Depends(pretty_response_flag),
     chunk_type: bool = False,
     return_txt: bool = False,
@@ -72,6 +93,12 @@ async def mineru(
         )
 
     file_bytes = await file.read()
+
+    if save_to_minio and file_ext in MARKDOWN_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail="MinIO storage is not supported for Markdown uploads.",
+        )
 
     if file_ext in MARKDOWN_EXTENSIONS:
         text_content = file_bytes.decode("utf-8", errors="ignore")
@@ -105,6 +132,23 @@ async def mineru(
     cleanup_paths = {tmp_path, *conversion_cleanup}
 
     try:
+        minio_context: MinioContext = None
+        minio_prefix_value: Optional[str] = None
+        if save_to_minio:
+            if not processing_path.lower().endswith(".pdf"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="MinIO storage requires a PDF input after preprocessing.",
+                )
+            minio_context = initialize_minio_context(
+                save_to_minio,
+                minio_address,
+                minio_access_key,
+                minio_secret_key,
+                minio_bucket,
+            )
+            minio_prefix_value = build_minio_prefix(filename, minio_prefix)
+
         # Dispatch to GPU scheduler; this returns a Future
         fut = scheduler.submit(
             processing_path,
@@ -140,7 +184,26 @@ async def mineru(
         txt_text = payload.get("txt")
         if return_txt:
             txt_text = build_plain_text(items)
-        response_model = ResponseWithPageNum(result=items, txt=txt_text if return_txt else None)
+        minio_assets_summary: Optional[MinioAssetSummary] = None
+        if minio_context:
+            assert minio_prefix_value is not None  # for mypy
+            chunks_with_pages = [
+                (item.text, item.page_number)
+                for item in items
+                if item.text and item.text.strip()
+            ]
+            minio_assets_summary = upload_pdf_assets(
+                minio_context,
+                minio_prefix_value,
+                processing_path,
+                chunks_with_pages,
+            )
+
+        response_model = ResponseWithPageNum(
+            result=items,
+            txt=txt_text if return_txt else None,
+            minio_assets=minio_assets_summary,
+        )
         return json_response(response_model, pretty)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
