@@ -47,8 +47,8 @@ def _base_providers() -> Dict[str, ProviderSpec]:
         ),
         "vllm": ProviderSpec(
             key="vllm",
-            models=["Qwen/Qwen3-VL-30B-A3B-Instruct"],
-            default_model="Qwen/Qwen3-VL-30B-A3B-Instruct",
+            models=["Qwen/Qwen3-VL-30B-A3B-Instruct-FP8"],
+            default_model="Qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
             call=vision_completion_vllm,
             has_credentials=has_vllm_credentials,
         ),

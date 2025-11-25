@@ -8,7 +8,7 @@ from openai import OpenAI
 
 from src.config.config import VLLM_API_KEY, VLLM_BASE_URL, VLLM_BASE_URLS
 
-DEFAULT_VISION_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct"
+DEFAULT_VISION_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct-FP8"
 _FALLBACK_API_KEY = "not-required"
 _DEFAULT_PROMPT = (
     "What is in this image? Use any provided page numbers and [ChunkType=Title] markers to"
