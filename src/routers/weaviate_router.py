@@ -41,6 +41,7 @@ from src.utils.mineru_support import (
     mineru_supported_extensions,
 )
 from src.utils.response_utils import json_response, pretty_response_flag
+from src.routers.mineru_minio_utils import normalize_prefix_component
 
 router = APIRouter()
 
@@ -183,7 +184,7 @@ def _initialize_minio_context(
 
 def _build_minio_prefix(collection: str, filename: str) -> str:
     base = os.path.splitext(os.path.basename(filename))[0]
-    base_clean = re.sub(r"[^0-9A-Za-z_-]+", "_", base).strip("_") or "document"
+    base_clean = normalize_prefix_component(base) or "document"
     return f"{collection}/{base_clean}"
 
 

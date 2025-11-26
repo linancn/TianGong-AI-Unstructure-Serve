@@ -92,7 +92,7 @@ def initialize_minio_context(
     return cfg, client
 
 
-def _normalize_prefix_component(raw: str) -> str:
+def normalize_prefix_component(raw: str) -> str:
     if not raw:
         return ""
 
@@ -124,10 +124,10 @@ def _normalize_prefix_component(raw: str) -> str:
 
 def build_minio_prefix(filename: str, custom_prefix: Optional[str]) -> str:
     base = os.path.splitext(os.path.basename(filename))[0]
-    base_clean = _normalize_prefix_component(base) or "document"
+    base_clean = normalize_prefix_component(base) or "document"
 
     if custom_prefix:
-        custom_clean = _normalize_prefix_component(custom_prefix)
+        custom_clean = normalize_prefix_component(custom_prefix)
         if custom_clean:
             return f"{custom_clean}/{base_clean}"
 
@@ -212,6 +212,7 @@ __all__ = [
     "MINIO_PREFIX_ROOT",
     "MinioContext",
     "initialize_minio_context",
+    "normalize_prefix_component",
     "build_minio_prefix",
     "upload_pdf_assets",
     "upload_meta_text",

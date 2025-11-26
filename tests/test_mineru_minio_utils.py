@@ -3,9 +3,9 @@ from src.services.minio_storage import MinioAssetRecord, MinioConfig
 
 
 def test_normalize_prefix_component_preserves_chinese_characters_and_punctuation():
-    assert mmu._normalize_prefix_component("中文文档 版本1") == "中文文档_版本1"
+    assert mmu.normalize_prefix_component("中文文档 版本1") == "中文文档_版本1"
     assert (
-        mmu._normalize_prefix_component("宋佳丽，曹宏斌——2019、面向能源金属")
+        mmu.normalize_prefix_component("宋佳丽，曹宏斌——2019、面向能源金属")
         == "宋佳丽，曹宏斌——2019、面向能源金属"
     )
 
