@@ -21,6 +21,7 @@
   - 可选通过 `return_txt` 返回纯文本串（标题段落追加 `\n\n`、普通段落 `\n`）及内容类型标签，结果统一映射到 `TextElementWithPageNum` 模型。
   - 当调用端传入 `chunk_type=true` 时，解析结果除了保留标题（`type="title"`）外，还会额外返回页眉与页脚片段（`type="header"`/`"footer"`），并将页眉放在结果列表顶部；`page_number` 类型仍被忽略，且 `return_txt=true` 时的纯文本输出会按同样顺序拼接。
   - `/mineru` 与 `/mineru_with_images` 均支持 `save_to_minio` 与 `minio_*` 表单字段，成功时会在 `mineru/<文件名>`（可自定义 `minio_prefix`）下写入源 PDF、解析 JSON 与逐页 JPEG，并通过响应体的 `minio_assets` 摘要返回上传结果；当 `chunk_type=true` 时，写入 MinIO 的 `parsed.json` 会保留 `type` 字段（header/footer/title）以便下游消费。两者唯一差异是 `/mineru_with_images` 会额外调用视觉大模型（`pipeline="images"`）为图像生成描述。
+  - `mineru_minio_utils.build_minio_prefix()` 支持保留 Unicode/中文字符及常见中文标点，空格会被直接保留，仅会把制表/换行等危险控制字符压缩为 `_` 并清理多余分隔符，避免中文文件名被统一映射到 `mineru/document`；对应校验见 `tests/test_mineru_minio_utils.py`。
 - **Weaviate 入库**（`src/routers/weaviate_router.py`）  
   - 解析流程同 MinerU，并在需要时将 PDF、截图等资产上传至 MinIO（`upload_pdf_bundle`），随后调用 `insert_text_chunks` 将分块文本写入指定 collection。  
   - 支持根据用户与知识库名称生成合法 class 名（`build_weaviate_collection_name`），并可选择视觉模型抽取摘要。

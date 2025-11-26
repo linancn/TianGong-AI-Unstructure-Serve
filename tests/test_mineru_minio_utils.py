@@ -2,6 +2,22 @@ from src.routers import mineru_minio_utils as mmu
 from src.services.minio_storage import MinioAssetRecord, MinioConfig
 
 
+def test_normalize_prefix_component_preserves_chinese_characters_and_punctuation():
+    assert mmu._normalize_prefix_component("中文文档 版本1") == "中文文档 版本1"
+    assert (
+        mmu._normalize_prefix_component("宋佳丽，曹宏斌——2019、面向能源金属")
+        == "宋佳丽，曹宏斌——2019、面向能源金属"
+    )
+
+
+def test_build_minio_prefix_with_unicode_values():
+    assert mmu.build_minio_prefix("中文文档.pdf", None) == "mineru/中文文档"
+    assert (
+        mmu.build_minio_prefix("项目 计划.docx", "用户A/知识库")
+        == "用户A/知识库/项目 计划"
+    )
+
+
 def test_upload_pdf_assets_preserves_chunk_type(monkeypatch):
     cfg = MinioConfig(
         endpoint="minio:9000",

@@ -1,5 +1,6 @@
 import os
 import re
+import unicodedata
 from typing import Optional, Sequence, Tuple
 
 from fastapi import HTTPException
@@ -17,6 +18,24 @@ from src.services.minio_storage import (
 
 MINIO_PREFIX_ROOT = "mineru"
 MinioContext = Optional[Tuple[MinioConfig, object]]
+_ALLOWED_PREFIX_SPECIAL_CHARS = {
+    "/",
+    "_",
+    "-",
+    "—",
+    "–",
+    "·",
+    "，",
+    "。",
+    "、",
+    "（",
+    "）",
+    "【",
+    "】",
+    "《",
+    "》",
+}
+_ALLOWED_PREFIX_WHITESPACE_CHARS = {" ", "\u3000"}
 
 
 def initialize_minio_context(
@@ -74,8 +93,39 @@ def initialize_minio_context(
 
 
 def _normalize_prefix_component(raw: str) -> str:
-    cleaned = re.sub(r"[^0-9A-Za-z/_-]+", "_", raw).strip("/_")
-    return cleaned
+    if not raw:
+        return ""
+
+    result: list[str] = []
+
+    for ch in raw:
+        if ch in _ALLOWED_PREFIX_SPECIAL_CHARS:
+            result.append(ch)
+            continue
+
+        if ch in _ALLOWED_PREFIX_WHITESPACE_CHARS:
+            if result and result[-1] == " ":
+                continue
+            result.append(" ")
+            continue
+
+        if ch.isspace():
+            replacement = "_"
+        else:
+            category = unicodedata.category(ch)
+            if category and category[0] in {"L", "N"}:
+                result.append(ch)
+                continue
+            replacement = "_"
+
+        if replacement == "_" and result and result[-1] == "_":
+            continue
+        result.append(replacement)
+
+    cleaned = "".join(result)
+    cleaned = re.sub(r"/{2,}", "/", cleaned)
+    cleaned = re.sub(r"_+", "_", cleaned)
+    return cleaned.strip("/_")
 
 
 def build_minio_prefix(filename: str, custom_prefix: Optional[str]) -> str:
