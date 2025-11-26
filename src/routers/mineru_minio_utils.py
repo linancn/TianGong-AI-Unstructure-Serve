@@ -35,7 +35,6 @@ _ALLOWED_PREFIX_SPECIAL_CHARS = {
     "《",
     "》",
 }
-_ALLOWED_PREFIX_WHITESPACE_CHARS = {" ", "\u3000"}
 
 
 def initialize_minio_context(
@@ -101,12 +100,6 @@ def _normalize_prefix_component(raw: str) -> str:
     for ch in raw:
         if ch in _ALLOWED_PREFIX_SPECIAL_CHARS:
             result.append(ch)
-            continue
-
-        if ch in _ALLOWED_PREFIX_WHITESPACE_CHARS:
-            if result and result[-1] == " ":
-                continue
-            result.append(" ")
             continue
 
         if ch.isspace():
