@@ -20,6 +20,7 @@ class MinioAssetSummary(BaseModel):
     pdf_object: str
     json_object: str
     page_images: List[MinioPageImage]
+    meta_object: Optional[str] = None
 
 
 class ResponseWithPageNum(BaseModel):

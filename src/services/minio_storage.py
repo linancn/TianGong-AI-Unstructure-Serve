@@ -35,6 +35,7 @@ class MinioAssetRecord:
     json_object: str
     page_images: List[Tuple[int, str]] = field(default_factory=list)
     prefix: Optional[str] = None
+    meta_object: Optional[str] = None
 
 
 @dataclass

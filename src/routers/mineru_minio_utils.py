@@ -13,6 +13,7 @@ from src.services.minio_storage import (
     create_client,
     ensure_bucket,
     parse_minio_endpoint,
+    upload_bytes,
     upload_pdf_bundle,
 )
 
@@ -181,10 +182,37 @@ def upload_pdf_assets(
     )
 
 
+def upload_meta_text(ctx: MinioContext, prefix: str, meta_text: str) -> str:
+    if ctx is None:
+        raise RuntimeError("MinIO context is required to upload meta.txt.")
+
+    cfg, client = ctx
+    normalized_prefix = prefix.strip("/")
+    object_prefix = f"{normalized_prefix}/" if normalized_prefix else ""
+    object_name = f"{object_prefix}meta.txt"
+    data = meta_text.encode("utf-8")
+
+    try:
+        upload_bytes(
+            client,
+            cfg.bucket,
+            object_name,
+            data,
+            content_type="text/plain; charset=utf-8",
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=500, detail=f"Failed to upload MinIO meta.txt: {exc}"
+        ) from exc
+
+    return object_name
+
+
 __all__ = [
     "MINIO_PREFIX_ROOT",
     "MinioContext",
     "initialize_minio_context",
     "build_minio_prefix",
     "upload_pdf_assets",
+    "upload_meta_text",
 ]

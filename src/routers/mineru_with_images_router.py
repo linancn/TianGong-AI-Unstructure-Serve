@@ -16,6 +16,7 @@ from src.routers.mineru_minio_utils import (
     MinioContext,
     build_minio_prefix,
     initialize_minio_context,
+    upload_meta_text,
     upload_pdf_assets,
 )
 from src.utils.file_conversion import (
@@ -109,6 +110,10 @@ async def mineru_with_images(
         None,
         description="Optional custom prefix for stored assets; defaults to mineru/<filename>.",
     ),
+    minio_meta: Optional[str] = Form(
+        None,
+        description="Optional string stored as meta.txt next to source.pdf when save_to_minio=true.",
+    ),
     pretty: bool = Depends(pretty_response_flag),
     chunk_type: bool = False,
     return_txt: bool = False,
@@ -137,6 +142,12 @@ async def mineru_with_images(
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported file type. Allowed types: {ACCEPTED_EXTENSIONS_STR}",
+        )
+
+    if minio_meta is not None and not save_to_minio:
+        raise HTTPException(
+            status_code=400,
+            detail="minio_meta requires save_to_minio=true.",
         )
 
     if save_to_minio and file_ext in MARKDOWN_EXTENSIONS:
@@ -263,6 +274,13 @@ async def mineru_with_images(
                 processing_path,
                 chunks_with_pages,
             )
+            if minio_meta is not None:
+                meta_object = upload_meta_text(
+                    minio_context,
+                    minio_prefix_value,
+                    minio_meta,
+                )
+                minio_assets_summary.meta_object = meta_object
         response_model = ResponseWithPageNum(
             result=items,
             txt=txt_text if return_txt else None,

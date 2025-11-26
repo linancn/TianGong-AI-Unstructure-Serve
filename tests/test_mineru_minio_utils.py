@@ -12,10 +12,7 @@ def test_normalize_prefix_component_preserves_chinese_characters_and_punctuation
 
 def test_build_minio_prefix_with_unicode_values():
     assert mmu.build_minio_prefix("中文文档.pdf", None) == "mineru/中文文档"
-    assert (
-        mmu.build_minio_prefix("项目 计划.docx", "用户A/知识库")
-        == "用户A/知识库/项目_计划"
-    )
+    assert mmu.build_minio_prefix("项目 计划.docx", "用户A/知识库") == "用户A/知识库/项目_计划"
 
 
 def test_upload_pdf_assets_preserves_chunk_type(monkeypatch):
@@ -62,3 +59,36 @@ def test_upload_pdf_assets_preserves_chunk_type(monkeypatch):
     assert summary.pdf_object.endswith("source.pdf")
     assert recorded["parsed_payload"][0]["type"] == "header"
     assert "type" not in recorded["parsed_payload"][1]
+
+
+def test_upload_meta_text_appends_meta_file(monkeypatch):
+    cfg = MinioConfig(
+        endpoint="minio:9000",
+        access_key="key",
+        secret_key="secret",
+        bucket="bucket",
+        secure=False,
+    )
+    fake_client = object()
+
+    recorded: dict = {}
+
+    def fake_upload_bytes(client, bucket, object_name, data, content_type=None):  # noqa: ARG001
+        recorded["bucket"] = bucket
+        recorded["object_name"] = object_name
+        recorded["data"] = data
+        recorded["content_type"] = content_type
+
+    monkeypatch.setattr(mmu, "upload_bytes", fake_upload_bytes)
+
+    obj_name = mmu.upload_meta_text(
+        ctx=(cfg, fake_client),
+        prefix="mineru/sample",
+        meta_text="some meta 信息",
+    )
+
+    assert obj_name.endswith("meta.txt")
+    assert recorded["bucket"] == "bucket"
+    assert recorded["object_name"].startswith("mineru/sample")
+    assert recorded["data"] == "some meta 信息".encode("utf-8")
+    assert recorded["content_type"] == "text/plain; charset=utf-8"
