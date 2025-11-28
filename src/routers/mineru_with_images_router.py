@@ -144,11 +144,9 @@ async def mineru_with_images(
             detail=f"Unsupported file type. Allowed types: {ACCEPTED_EXTENSIONS_STR}",
         )
 
-    if minio_meta is not None and not save_to_minio:
-        raise HTTPException(
-            status_code=400,
-            detail="minio_meta requires save_to_minio=true.",
-        )
+    if not save_to_minio:
+        # Ignore meta payloads when MinIO persistence is disabled.
+        minio_meta = None
 
     if save_to_minio and file_ext in MARKDOWN_EXTENSIONS:
         raise HTTPException(
