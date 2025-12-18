@@ -45,7 +45,7 @@
 - 所有默认配置来自 `.secrets/secrets.toml`，通过 `src/config/config.py` 读取，并允许环境变量覆盖。敏感字段包括 FASTAPI Bearer Token、OpenAI/Gemini/VLLM API Key 等。
 - 关键环境变量：  
   - `FASTAPI_AUTH` / `FASTAPI_BEARER_TOKEN`：是否开启 Bearer 鉴权及令牌值。  
-  - `MINERU_*`：控制 MinerU 模型源、VLM 服务地址、任务超时时间。  
+  - `MINERU_*`：控制 MinerU 模型源、VLM 服务地址、任务超时时间；新增 `.env` 默认的 MinerU 解析策略：`MINERU_DEFAULT_BACKEND`（默认 `vlm-http-client`，可选 `pipeline`/`vlm-transformers`/`vlm-vllm-engine`/`vlm-lmdeploy-engine`/`vlm-http-client`/`vlm-mlx-engine`）、`MINERU_DEFAULT_LANG`（默认 `ch`）、`MINERU_DEFAULT_METHOD`（默认 `auto`），通过 `python-dotenv` 在解析进程中自动加载。  
   - `MINERU_OFFICE_CONVERT_TIMEOUT_SECONDS`：LibreOffice Office→PDF 转换超时时间（默认 180s），超时会终止转换并返回 500。  
   - `VISION_PROVIDER_CHOICES`、`VISION_MODELS_*`：视觉模型白名单。  
   - `VLLM_BASE_URL` / `VLLM_BASE_URLS`：指定 vLLM 视觉服务地址，支持逗号分隔配置多实例，按轮询方式调用（`.secrets/secrets.toml` 支持 `BASE_URL` 与 `BASE_URLS` 两种字段）。  

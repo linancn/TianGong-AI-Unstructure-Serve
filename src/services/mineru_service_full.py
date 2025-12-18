@@ -8,6 +8,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Optional
 
+from dotenv import load_dotenv
 from loguru import logger
 
 from mineru.cli.common import convert_pdf_bytes_to_bytes_by_pypdfium2, prepare_env, read_fn
@@ -30,9 +31,14 @@ _SERVER_URL_ENV_KEYS: tuple[str, ...] = (
     "MINERU_VLM_SERVER_URLS",
     "MINERU_VLM_SERVER_URL",
 )
+_DEFAULT_BACKEND = "vlm-http-client"
+_DEFAULT_LANG = "ch"
+_DEFAULT_METHOD = "auto"
 _SERVER_URL_CYCLE_LOCK = Lock()
 _SERVER_URL_CACHE: tuple[str, ...] = ()
 _SERVER_URL_CYCLE = None
+
+load_dotenv()
 
 
 def _normalize_server_url_input(raw_value) -> list[str]:
@@ -101,6 +107,33 @@ def _next_server_url(urls: list[str]) -> str:
             _SERVER_URL_CACHE = urls_tuple
             logger.debug("Configured VLM server pool: %s", urls_tuple)
         return next(_SERVER_URL_CYCLE)
+
+
+def _env_default_backend() -> str:
+    raw_value = os.getenv("MINERU_DEFAULT_BACKEND")
+    if raw_value is not None:
+        candidate = raw_value.strip()
+        if candidate:
+            return candidate
+    return _DEFAULT_BACKEND
+
+
+def _env_default_lang() -> str:
+    raw_value = os.getenv("MINERU_DEFAULT_LANG")
+    if raw_value is not None:
+        candidate = raw_value.strip()
+        if candidate:
+            return candidate
+    return _DEFAULT_LANG
+
+
+def _env_default_method() -> str:
+    raw_value = os.getenv("MINERU_DEFAULT_METHOD")
+    if raw_value is not None:
+        candidate = raw_value.strip()
+        if candidate:
+            return candidate
+    return _DEFAULT_METHOD
 
 
 def _debug_default_serializer(obj: Any):
@@ -397,9 +430,9 @@ def do_parse(
 def parse_doc(
     path_list: list[Path],
     output_dir,
-    lang="ch",
-    backend="vlm-http-client",
-    method="auto",
+    lang: Optional[str] = None,
+    backend: Optional[str] = None,
+    method: Optional[str] = None,
     server_url=None,
     start_page_id=0,  # Start page ID for parsing, default is 0
     end_page_id=None,  # End page ID for parsing, default is None (parse all pages until the end of the document)
@@ -411,16 +444,18 @@ def parse_doc(
     Parameter description:
     path_list: List of document paths to be parsed, can be PDF or image files.
     output_dir: Output directory for storing parsing results.
-    lang: Language option, default is 'ch', optional values include['ch', 'ch_server', 'ch_lite', 'en', 'korean', 'japan', 'chinese_cht', 'ta', 'te', 'ka']。
+    lang: Language option, default from MINERU_DEFAULT_LANG (fallback 'ch'); optional values include['ch', 'ch_server', 'ch_lite', 'en', 'korean', 'japan', 'chinese_cht', 'ta', 'te', 'ka']。
         Input the languages in the pdf (if known) to improve OCR accuracy.  Optional.
         Adapted only for the case where the backend is set to "pipeline"
-    backend: the backend for parsing pdf:
+    backend: the backend for parsing pdf (default from MINERU_DEFAULT_BACKEND, fallback 'vlm-http-client'):
+    backend options:
         pipeline: More general.
         vlm-transformers: More general.
-        vlm-sglang-engine: Faster(engine).
-        vlm-sglang-client: Faster(client).
-        without method specified, pipeline will be used by default.
-    method: the method for parsing pdf:
+        vlm-vllm-engine: Faster (vLLM engine).
+        vlm-lmdeploy-engine: Faster (LMDeploy engine).
+        vlm-http-client: Faster (HTTP client).
+        vlm-mlx-engine: Apple silicon local engine.
+    method: the method for parsing pdf (default from MINERU_DEFAULT_METHOD, fallback 'auto'):
         auto: Automatically determine the method based on the file type.
         txt: Use text extraction method.
         ocr: Use OCR method for image-based PDFs.
@@ -435,6 +470,9 @@ def parse_doc(
     return_txt: When True, callers are expected to compose a plain-text string from parsed chunks.
     """
     try:
+        effective_backend = (backend or "").strip() or _env_default_backend()
+        effective_lang = (lang or "").strip() or _env_default_lang()
+        effective_method = (method or "").strip() or _env_default_method()
         file_name_list = []
         pdf_bytes_list = []
         lang_list = []
@@ -443,14 +481,14 @@ def parse_doc(
             pdf_bytes = read_fn(path)
             file_name_list.append(file_name)
             pdf_bytes_list.append(pdf_bytes)
-            lang_list.append(lang)
+            lang_list.append(effective_lang)
         response = do_parse(
             output_dir=output_dir,
             pdf_file_names=file_name_list,
             pdf_bytes_list=pdf_bytes_list,
             p_lang_list=lang_list,
-            backend=backend,
-            parse_method=method,
+            backend=effective_backend,
+            parse_method=effective_method,
             server_url=server_url,
             start_page_id=start_page_id,
             end_page_id=end_page_id,
@@ -485,9 +523,12 @@ if __name__ == "__main__":
     """Use pipeline mode if your environment does not support VLM"""
     parse_doc(doc_path_list, output_dir, backend="pipeline")
 
-    """To enable VLM mode, change the backend to 'vlm-xxx'"""
+    """To enable VLM mode, change the backend to one of the vlm-* options"""
     # parse_doc(doc_path_list, output_dir, backend="vlm-transformers")  # more general.
-    # parse_doc(doc_path_list, output_dir, backend="vlm-vllm-engine")  # faster(engine).
+    # parse_doc(doc_path_list, output_dir, backend="vlm-vllm-engine")  # vLLM engine.
+    # parse_doc(doc_path_list, output_dir, backend="vlm-lmdeploy-engine")  # LMDeploy engine.
+    # parse_doc(doc_path_list, output_dir, backend="vlm-http-client")  # HTTP client.
+    # parse_doc(doc_path_list, output_dir, backend="vlm-mlx-engine")  # Apple silicon engine.
     # parse_doc(
     #     doc_path_list,
     #     output_dir,

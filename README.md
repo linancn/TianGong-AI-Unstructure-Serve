@@ -45,6 +45,14 @@ sudo apt install -y pandoc
 sudo apt install -y graphicsmagick
 ```
 
+### MinerU runtime defaults (.env)
+
+- `.env` is loaded automatically; adjust defaults there without touching code.
+- `MINERU_DEFAULT_BACKEND` controls the parsing backend (default `vlm-http-client`; options: `pipeline`, `vlm-transformers`, `vlm-vllm-engine`, `vlm-lmdeploy-engine`, `vlm-http-client`, `vlm-mlx-engine`).
+- `MINERU_DEFAULT_LANG` sets the OCR language hint for pipeline mode (default `ch`).
+- `MINERU_DEFAULT_METHOD` sets the pipeline parse method (`auto`/`txt`/`ocr`, default `auto`).
+- `MINERU_VLLM_SERVER_URLS` / `MINERU_VLLM_SERVER_URL` (or `MINERU_VLM_SERVER_URLS` / `MINERU_VLM_SERVER_URL`) list VLM endpoints; comma-separated or JSON array values are accepted. If unset, the service falls back to `http://127.0.0.1:30000`.
+
 Test Cuda (optional):
 
 ```bash
