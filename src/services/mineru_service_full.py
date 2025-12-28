@@ -93,6 +93,21 @@ def _resolve_server_urls(server_url) -> list[str]:
     return [DEFAULT_VLLM_SERVER_URL]
 
 
+def _resolve_server_headers(headers: Optional[dict[str, str]] = None) -> Optional[dict[str, str]]:
+    if headers:
+        return headers
+
+    auth_header = os.getenv("MINERU_VLLM_AUTH_HEADER")
+    api_key = os.getenv("MINERU_VLLM_API_KEY")
+    resolved: dict[str, str] = {}
+    if auth_header and auth_header.strip():
+        resolved["Authorization"] = auth_header.strip()
+    elif api_key and api_key.strip():
+        resolved["Authorization"] = f"Bearer {api_key.strip()}"
+
+    return resolved or None
+
+
 def _next_server_url(urls: list[str]) -> str:
     if not urls:
         raise ValueError("No VLM server URLs available.")
@@ -206,6 +221,7 @@ def do_parse(
     p_formula_enable=True,  # Enable formula parsing
     p_table_enable=True,  # Enable table parsing
     server_url=None,  # Server URL for vlm-sglang-client backend
+    server_headers=None,  # Optional headers (e.g., Authorization) for vlm-http-client backend
     f_draw_layout_bbox=True,  # Whether to draw layout bounding boxes
     f_draw_span_bbox=True,  # Whether to draw span bounding boxes
     f_dump_md=False,  # Whether to dump markdown files
@@ -333,6 +349,7 @@ def do_parse(
         f_draw_span_bbox = False
         parse_method = "vlm"
         server_urls = _resolve_server_urls(server_url)
+        resolved_headers = _resolve_server_headers(server_headers)
         assigned_urls = [_next_server_url(server_urls) for _ in range(len(pdf_bytes_list))]
         for idx, pdf_bytes in enumerate(pdf_bytes_list):
             pdf_file_name = pdf_file_names[idx]
@@ -352,6 +369,7 @@ def do_parse(
                 image_writer=image_writer,
                 backend=backend,
                 server_url=assigned_urls[idx],
+                server_headers=resolved_headers,
             )
 
             pdf_info = middle_json["pdf_info"]
@@ -434,6 +452,7 @@ def parse_doc(
     backend: Optional[str] = None,
     method: Optional[str] = None,
     server_url=None,
+    server_headers=None,
     start_page_id=0,  # Start page ID for parsing, default is 0
     end_page_id=None,  # End page ID for parsing, default is None (parse all pages until the end of the document)
     dump_debug_intermediate=False,  # Dump intermediate payloads for debugging
@@ -465,6 +484,8 @@ def parse_doc(
         When omitted, the service checks the environment variables
         MINERU_VLLM_SERVER_URLS / MINERU_VLM_SERVER_URLS (and singular forms) before
         falling back to http://127.0.0.1:30000.
+    server_headers: Optional dict of headers (e.g., Authorization). When omitted, the service builds
+        Authorization automatically from MINERU_VLLM_AUTH_HEADER or MINERU_VLLM_API_KEY.
     dump_debug_intermediate: When True, writes out intermediate parsing payloads for debugging.
     log_debug_intermediate: When True, logs intermediate parsing payloads for debugging.
     return_txt: When True, callers are expected to compose a plain-text string from parsed chunks.
@@ -490,6 +511,7 @@ def parse_doc(
             backend=effective_backend,
             parse_method=effective_method,
             server_url=server_url,
+            server_headers=server_headers,
             start_page_id=start_page_id,
             end_page_id=end_page_id,
             f_dump_debug_intermediate=dump_debug_intermediate,
