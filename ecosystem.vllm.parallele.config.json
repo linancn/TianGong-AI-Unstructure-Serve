@@ -2,7 +2,7 @@
   "apps": [
     {
       "name": "mineru-vllm-server",
-      "cwd": "/home/david/projects/TianGong-AI-Unstructure-Serve",
+      "cwd": ".",
       "script": ".venv/bin/mineru-vllm-server",
       "args": "--port 30000 --data-parallel-size 4",
       "exec_mode": "fork",
