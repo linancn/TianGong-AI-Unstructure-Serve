@@ -1,0 +1,16 @@
+{
+  "apps": [
+    {
+      "name": "mineru-vllm-server",
+      "cwd": "/home/david/projects/TianGong-AI-Unstructure-Serve",
+      "script": ".venv/bin/mineru-vllm-server",
+      "args": "--port 30000 --data-parallel-size 4",
+      "exec_mode": "fork",
+      "interpreter": "none",
+      "env": {
+        "MINERU_MODEL_SOURCE": "modelscope",
+        "CUDA_VISIBLE_DEVICES": "0,1,2,3"
+      }
+    }
+  ]
+}
