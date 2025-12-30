@@ -2,6 +2,10 @@ import os
 from typing import Optional
 
 import toml
+from dotenv import load_dotenv
+
+# Load .env early so environment overrides are visible before config values are read.
+load_dotenv()
 
 config = toml.load(".secrets/secrets.toml")
 
