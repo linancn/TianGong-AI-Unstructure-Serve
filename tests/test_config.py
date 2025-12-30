@@ -20,8 +20,23 @@ def _reload_config(
     }
 
     monkeypatch.setattr("toml.load", lambda _: config_data)
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *_, **__: None)
 
     env_overrides = env_overrides or {}
+    # Clear environment to avoid leaking real .env values into tests.
+    for key in (
+        "FASTAPI_AUTH",
+        "FASTAPI_BEARER_TOKEN",
+        "FASTAPI_MIDDLEWARE_SECRECT_KEY",
+        "OPENAI_API_KEY",
+        "GENIMI_API_KEY",
+        "VLLM_API_KEY",
+        "VLLM_BASE_URL",
+        "VLLM_BASE_URLS",
+    ):
+        if key not in env_overrides:
+            monkeypatch.delenv(key, raising=False)
+
     for key, value in env_overrides.items():
         if value is None:
             monkeypatch.delenv(key, raising=False)
