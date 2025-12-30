@@ -13,10 +13,6 @@
         "MINERU_IMAGES_HARD_TIMEOUT_SECONDS": "1800",
         "MINERU_SCI_HARD_TIMEOUT_SECONDS": "300",
         "MINERU_SCI_TIMEOUT_SECONDS": "110",
-        "VISION_PROVIDER": "vllm",
-        "VISION_MODELS_VLLM": "Qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
-        "VISION_CONTEXT_WINDOW": "2",
-        "MINERU_VLLM_SERVER_URLS": "http://127.0.0.1:30000",
         "MINERU_OFFICE_CONVERT_TIMEOUT_SECONDS": "600"
       },
       "out_file": "gunicorn.log",
