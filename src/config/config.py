@@ -30,12 +30,14 @@ def _bool_from_env(var_name: str, default: bool) -> bool:
 
 
 FASTAPI_AUTH = _bool_from_env("FASTAPI_AUTH", config["FASTAPI"]["AUTH"])
-FASTAPI_BEARER_TOKEN = config["FASTAPI"]["BEARER_TOKEN"]
-FASTAPI_MIDDLEWARE_SECRECT_KEY = config["FASTAPI"]["MIDDLEWARE_SECRECT_KEY"]
+FASTAPI_BEARER_TOKEN = _env_override("FASTAPI_BEARER_TOKEN", config["FASTAPI"]["BEARER_TOKEN"])
+FASTAPI_MIDDLEWARE_SECRECT_KEY = _env_override(
+    "FASTAPI_MIDDLEWARE_SECRECT_KEY", config["FASTAPI"]["MIDDLEWARE_SECRECT_KEY"]
+)
 
-OPENAI_API_KEY = config["OPENAI"]["API_KEY"]
+OPENAI_API_KEY = _env_override("OPENAI_API_KEY", config["OPENAI"]["API_KEY"])
 
-GENIMI_API_KEY = config["GOOGLE"]["API_KEY"]
+GENIMI_API_KEY = _env_override("GENIMI_API_KEY", config["GOOGLE"]["API_KEY"])
 
 VLLM_API_KEY = _env_override("VLLM_API_KEY", config["VLLM"]["API_KEY"])
 _VLLM_BASE_URL_DEFAULT = config["VLLM"].get("BASE_URL") or config["VLLM"].get("BASE_URLS")

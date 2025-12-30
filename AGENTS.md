@@ -4,7 +4,7 @@
 - 这是一个基于 FastAPI 的非结构化文档解析与知识入库服务，负责统一封装 MinerU 文档解析、Markdown 转档、MinIO 对象存储、Weaviate 向量数据库写入以及视觉问答能力。
 - 主入口在 `src/main.py`，通过依赖注入决定是否开启 Bearer Token 鉴权，并集中挂载各类路由（健康检查、GPU 调度、MinerU 解析、Markdown 转 DOCX、MinIO 上传下载、Weaviate 入库等）。
 - GPU 解析任务由自研调度器 `src/services/gpu_scheduler.py` 进行统一排队、超时控制和多进程执行，保障 MinerU 解析稳定性。
-- 视觉模型封装在 `src/services/vision_service.py`，按环境变量动态选择 OpenAI、Gemini 或 vLLM 服务，并对模型列表、默认模型及凭证做运行时校验。
+- 视觉模型封装在 `src/services/vision_service.py`，按环境变量动态选择 OpenAI、Gemini 或 vLLM 服务，并对模型列表、默认模型及凭证做运行时校验；OpenAI 与 vLLM 通过 `src/services/vision_service_openai_compatible.py` 复用同一套 OpenAI-compatible 客户端池，提示词生成集中在 `src/services/vision_prompts.py`。
 - `src/main.py` 初始化根日志记录器为 INFO，并将 `httpx`/`httpcore` 日志级别降至 WARNING，避免打印请求详情。
 
 ## 目录速览
@@ -37,19 +37,20 @@
   - 按 GPU ID 创建 `ProcessPoolExecutor`，每个任务在独立子进程执行，并设有硬超时以防解析卡死。  
   - `/gpu/status` 路由可以查询每块 GPU 的排队任务数及运行情况。
 - **视觉问答/解析**（`src/services/vision_service.py`）  
-  - 统一调度 OpenAI、Gemini、vLLM 视觉大模型，按环境变量控制可用 provider、模型及凭证。
-  - 默认提示词已明确要求模型直接输出核心洞察，禁止使用“根据您提供的上下文信息”“以下是”等前置客套语。
-  - vLLM 客户端支持通过 `VLLM_BASE_URLS` 或逗号分隔的 `VLLM_BASE_URL` 配置多个后端，请求按轮询方式分发以平衡图片识别负载。
+  - 统一调度 OpenAI、Gemini、vLLM 视觉大模型；OpenAI 与 vLLM 通过 `vision_service_openai_compatible.py` 共用 OpenAI-compatible 客户端池（支持多个 base_url 轮询），OpenAI 需配置 `OPENAI_API_KEY`，vLLM 使用 `VLLM_BASE_URLS`/`VLLM_BASE_URL`（可逗号分隔）或 `VLLM_API_KEY`。
+  - 提示词构建集中在 `vision_prompts.py`，默认文案已明确要求模型直接输出核心洞察，禁止使用“根据您提供的上下文信息”“以下是”等前置客套语。
+  - 当 vLLM 仅提供 base_url 而未配置密钥时，会使用占位 key（`not-required`）落到相同的 OpenAI-compatible 请求路径。
 
 ## 配置与敏感信息
-- 所有默认配置来自 `.secrets/secrets.toml`，通过 `src/config/config.py` 读取，并允许环境变量覆盖。敏感字段包括 FASTAPI Bearer Token、OpenAI/Gemini/VLLM API Key 等。
+- 所有默认配置来自 `.secrets/secrets.toml`，通过 `src/config/config.py` 读取；运行时同名环境变量优先级更高，便于容器/CI 覆盖。敏感字段包括 FASTAPI Bearer Token、OpenAI/Gemini/VLLM API Key 等。
 - 关键环境变量：  
-  - `FASTAPI_AUTH` / `FASTAPI_BEARER_TOKEN`：是否开启 Bearer 鉴权及令牌值。  
+  - `FASTAPI_AUTH` / `FASTAPI_BEARER_TOKEN` / `FASTAPI_MIDDLEWARE_SECRECT_KEY`：是否开启 Bearer 鉴权及令牌值、中间件密钥。  
   - `MINERU_*`：控制 MinerU 模型源、VLM 服务地址、任务超时时间；新增 `.env` 默认的 MinerU 解析策略：`MINERU_DEFAULT_BACKEND`（默认 `vlm-http-client`，可选 `pipeline`/`vlm-transformers`/`vlm-vllm-engine`/`vlm-lmdeploy-engine`/`vlm-http-client`/`vlm-mlx-engine`）、`MINERU_DEFAULT_LANG`（默认 `ch`）、`MINERU_DEFAULT_METHOD`（默认 `auto`），通过 `python-dotenv` 在解析进程中自动加载。  
   - `MINERU_VLLM_API_KEY` / `MINERU_VLLM_AUTH_HEADER`：为 MinerU `vlm-http-client` 注入 HTTP Authorization 头；优先使用完整的 `MINERU_VLLM_AUTH_HEADER`，否则从 `MINERU_VLLM_API_KEY` 生成 `Bearer <key>`。  
   - `MINERU_OFFICE_CONVERT_TIMEOUT_SECONDS`：LibreOffice Office→PDF 转换超时时间（默认 180s），超时会终止转换并返回 500。  
+  - `OPENAI_API_KEY` / `GENIMI_API_KEY`：视觉/生成模型凭证，支持以环境变量覆盖默认 secrets。  
   - `VISION_PROVIDER_CHOICES`、`VISION_MODELS_*`：视觉模型白名单。  
-  - `VLLM_BASE_URL` / `VLLM_BASE_URLS`：指定 vLLM 视觉服务地址，支持逗号分隔配置多实例，按轮询方式调用（`.secrets/secrets.toml` 支持 `BASE_URL` 与 `BASE_URLS` 两种字段）。  
+  - `VLLM_BASE_URL` / `VLLM_BASE_URLS` / `VLLM_API_KEY`：指定 vLLM 视觉服务地址/凭证，支持逗号分隔配置多实例，按轮询方式调用（`.secrets/secrets.toml` 支持 `BASE_URL` 与 `BASE_URLS` 两种字段）。  
   - `WEAVIATE_*`：Weaviate 服务地址。  
   - `MINIO_*`：MinIO 凭证与目标桶。  
   - `CUDA_VISIBLE_DEVICES`：运行时显卡绑定。
