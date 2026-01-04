@@ -26,6 +26,7 @@ from src.utils.file_conversion import (
     maybe_convert_to_pdf,
 )
 from src.utils.markdown_parser import parse_markdown_chunks
+from src.utils.mineru_backend import resolve_backend_from_env
 from src.utils.mineru_support import (
     format_supported_extensions,
     mineru_supported_extensions,
@@ -144,6 +145,14 @@ async def mineru_with_images(
             detail=f"Unsupported file type. Allowed types: {ACCEPTED_EXTENSIONS_STR}",
         )
 
+    try:
+        backend_value = resolve_backend_from_env()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Invalid MINERU_DEFAULT_BACKEND: {exc}",
+        ) from exc
+
     if not save_to_minio:
         # Ignore meta payloads when MinIO persistence is disabled.
         minio_meta = None
@@ -214,6 +223,7 @@ async def mineru_with_images(
             vision_provider=provider,
             vision_model=model,
             return_txt=return_txt,
+            backend=backend_value,
         )
         payload = await _await_future(fut)
         result_payload = payload.get("result")

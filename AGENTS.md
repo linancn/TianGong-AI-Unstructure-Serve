@@ -19,6 +19,7 @@
 - **MinerU 文档解析**（`src/routers/mineru_router.py` 等）  
   - 支持 PDF、Office、Markdown 等格式，利用 `maybe_convert_to_pdf` 先行格式统一，再调用 GPU 调度器执行 MinerU 管线。  
   - 可选通过 `return_txt` 返回纯文本串（标题段落追加 `\n\n`、普通段落 `\n`）及内容类型标签，结果统一映射到 `TextElementWithPageNum` 模型。
+  - MinerU 后端由环境变量 `MINERU_DEFAULT_BACKEND` 控制；允许值：`pipeline`/`vlm-transformers`/`vlm-vllm-engine`/`vlm-lmdeploy-engine`/`vlm-http-client`/`vlm-mlx-engine`，接受 `hybrid-auto-engine`/`hybrid-http-client`（当前 MinerU 2.7.0 wheel 未包含 hybrid 实现，内部回退至 `vlm-vllm-engine`/`vlm-http-client`）。API 不再接受表单参数覆盖后端。校验与规范化逻辑见 `src/utils/mineru_backend.py`。  
   - 当调用端传入 `chunk_type=true` 时，解析结果除了保留标题（`type="title"`）外，还会额外返回页眉与页脚片段（`type="header"`/`"footer"`），并将页眉放在结果列表顶部；`page_number` 类型仍被忽略，且 `return_txt=true` 时的纯文本输出会按同样顺序拼接。
   - `/mineru` 与 `/mineru_with_images` 均支持 `save_to_minio` 与 `minio_*` 表单字段，成功时会在 `mineru/<文件名>`（可自定义 `minio_prefix`）下写入源 PDF、解析 JSON 与逐页 JPEG，并通过响应体的 `minio_assets` 摘要返回上传结果；当 `chunk_type=true` 时，写入 MinIO 的 `parsed.json` 会保留 `type` 字段（header/footer/title）以便下游消费。两者唯一差异是 `/mineru_with_images` 会额外调用视觉大模型（`pipeline="images"`）为图像生成描述。
   - 额外可选字段 `minio_meta` 会在 `save_to_minio=true` 时把传入字符串写入 `meta.txt`（与 `source.pdf` 同目录），返回的 `minio_assets.meta_object` 会指向该文件，便于下游查阅附加元信息；若 `save_to_minio=false`，后端会安全地忽略该字段，避免调用端因默认值冲突而报错。
@@ -46,15 +47,17 @@
   - 运行/调试方式：优先在 `.env` 中放敏感值与运行时模型选择；`ecosystem.config.json` 仅用于非敏感覆盖（如超时参数），避免在 PM2 配置中写入密钥或 vLLM base_url。PM2 启动时先加载 `.env`，再应用 `env` 块覆盖同名字段。
 - 关键环境变量：  
   - `FASTAPI_AUTH` / `FASTAPI_BEARER_TOKEN` / `FASTAPI_MIDDLEWARE_SECRECT_KEY`：是否开启 Bearer 鉴权及令牌值、中间件密钥。  
-  - `MINERU_*`：控制 MinerU 模型源、VLM 服务地址、任务超时时间；新增 `.env` 默认的 MinerU 解析策略：`MINERU_DEFAULT_BACKEND`（默认 `vlm-http-client`，可选 `pipeline`/`vlm-transformers`/`vlm-vllm-engine`/`vlm-lmdeploy-engine`/`vlm-http-client`/`vlm-mlx-engine`）、`MINERU_DEFAULT_LANG`（默认 `ch`）、`MINERU_DEFAULT_METHOD`（默认 `auto`），通过 `python-dotenv` 在解析进程中自动加载。  
-  - `MINERU_VLLM_API_KEY` / `MINERU_VLLM_AUTH_HEADER`：为 MinerU `vlm-http-client` 注入 HTTP Authorization 头；优先使用完整的 `MINERU_VLLM_AUTH_HEADER`，否则从 `MINERU_VLLM_API_KEY` 生成 `Bearer <key>`。  
-  - `MINERU_OFFICE_CONVERT_TIMEOUT_SECONDS`：LibreOffice Office→PDF 转换超时时间（默认 180s），超时会终止转换并返回 500。  
-  - `OPENAI_API_KEY` / `GENIMI_API_KEY`：视觉/生成模型凭证，支持以环境变量覆盖默认 secrets。  
-  - `VISION_PROVIDER_CHOICES`、`VISION_MODELS_*`：视觉模型白名单。  
-  - `VLLM_BASE_URL` / `VLLM_BASE_URLS` / `VLLM_API_KEY`：指定 vLLM 视觉服务地址/凭证，支持逗号分隔配置多实例，按轮询方式调用（`.secrets/secrets.toml` 支持 `BASE_URL` 与 `BASE_URLS` 两种字段）。  
-  - `WEAVIATE_*`：Weaviate 服务地址。  
-  - `MINIO_*`：MinIO 凭证与目标桶。  
-  - `CUDA_VISIBLE_DEVICES`：运行时显卡绑定。
+  - `MINERU_*`：控制 MinerU 模型源、VLM 服务地址、任务超时时间；新增 `.env` 默认的 MinerU 解析策略：`MINERU_DEFAULT_BACKEND`（默认 `vlm-http-client`，可选 `pipeline`/`vlm-transformers`/`vlm-vllm-engine`/`vlm-lmdeploy-engine`/`vlm-http-client`/`vlm-mlx-engine`，接受 `hybrid-*` 并在当前 wheel 下回退至对应 vlm backend）、`MINERU_DEFAULT_LANG`（默认 `ch`）、`MINERU_DEFAULT_METHOD`（默认 `auto`），通过 `python-dotenv` 在解析进程中自动加载。  
+    - `MINERU_HYBRID_BATCH_RATIO`：hybrid-* 小模型 batch 倍率（默认 8，仅 hybrid 模式有效，用于控制显存占用）。  
+    - `MINERU_VLLM_API_KEY` / `MINERU_VLLM_AUTH_HEADER`：为 MinerU `vlm-http-client` 注入 HTTP Authorization 头；优先使用完整的 `MINERU_VLLM_AUTH_HEADER`，否则从 `MINERU_VLLM_API_KEY` 生成 `Bearer <key>`。  
+    - `MINERU_OFFICE_CONVERT_TIMEOUT_SECONDS`：LibreOffice Office→PDF 转换超时时间（默认 180s），超时会终止转换并返回 500。  
+    - `OPENAI_API_KEY` / `GENIMI_API_KEY`：视觉/生成模型凭证，支持以环境变量覆盖默认 secrets。  
+    - `VISION_PROVIDER_CHOICES`、`VISION_MODELS_*`：视觉模型白名单。  
+    - `VLLM_BASE_URL` / `VLLM_BASE_URLS` / `VLLM_API_KEY`：指定 vLLM 视觉服务地址/凭证，支持逗号分隔配置多实例，按轮询方式调用（`.secrets/secrets.toml` 支持 `BASE_URL` 与 `BASE_URLS` 两种字段）。  
+    - `WEAVIATE_*`：Weaviate 服务地址。  
+    - `MINIO_*`：MinIO 凭证与目标桶。  
+    - `CUDA_VISIBLE_DEVICES`：运行时显卡绑定。  
+    - `MINERU_HYBRID_BATCH_RATIO` / `MINERU_HYBRID_FORCE_PIPELINE_ENABLE`：hybrid-* 小模型 batch 倍率（默认 8）与强制文本提取走小模型（默认 false）；仅 hybrid 模式生效。  
 - 本仓库默认将 `.secrets/` 视为外部私有目录，确保部署前准备好相应文件。
 
 ## 环境准备与运行

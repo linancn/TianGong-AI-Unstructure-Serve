@@ -254,6 +254,7 @@ def parse_with_images(
     file_path: str,
     *,
     chunk_type: bool = False,
+    backend: Optional[str] = None,
     vision_provider: Optional[VisionProvider] = None,
     vision_model: Optional[Union[VisionModel, str]] = None,
     vision_prompt: Optional[str] = None,
@@ -261,7 +262,7 @@ def parse_with_images(
 ) -> Tuple[List[Dict[str, object]], Optional[str]]:
     """Run MinerU parsing (GPU scheduler friendly) then enrich figures via multimodal vision."""
     with tempfile.TemporaryDirectory() as tmp_dir:
-        content_list, output_dir, _ = parse_doc([file_path], tmp_dir)
+        content_list, output_dir, _ = parse_doc([file_path], tmp_dir, backend=backend)
 
         working_blocks = _build_context_blocks(content_list)
         item_to_block_idx = _reindex_blocks(working_blocks)

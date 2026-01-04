@@ -51,7 +51,10 @@ sudo apt install -y graphicsmagick
 - `MINERU_DEFAULT_BACKEND` controls the parsing backend (default `vlm-http-client`; options: `pipeline`, `vlm-transformers`, `vlm-vllm-engine`, `vlm-lmdeploy-engine`, `vlm-http-client`, `vlm-mlx-engine`).
 - `MINERU_DEFAULT_LANG` sets the OCR language hint for pipeline mode (default `ch`).
 - `MINERU_DEFAULT_METHOD` sets the pipeline parse method (`auto`/`txt`/`ocr`, default `auto`).
+- MinerU 后端通过 `MINERU_DEFAULT_BACKEND` 环境变量配置；允许值：`pipeline`/`vlm-transformers`/`vlm-vllm-engine`/`vlm-lmdeploy-engine`/`vlm-http-client`/`vlm-mlx-engine`，额外接受 `hybrid-auto-engine`/`hybrid-http-client`（当前 MinerU 2.7.0 wheel 未内置 hybrid 实现，内部会回退到 `vlm-vllm-engine`/`vlm-http-client`）。API 不再接受表单参数覆盖后端。
 - `MINERU_VLLM_SERVER_URLS` / `MINERU_VLLM_SERVER_URL` (or `MINERU_VLM_SERVER_URLS` / `MINERU_VLM_SERVER_URL`) list VLM endpoints; comma-separated or JSON array values are accepted. If unset, the service falls back to `http://127.0.0.1:30000`.
+- `MINERU_HYBRID_BATCH_RATIO` 控制 hybrid-* 后端小模型 batch 倍率（默认 8）；仅在 hybrid 模式有效，用于权衡显存占用。
+- `MINERU_HYBRID_FORCE_PIPELINE_ENABLE` 强制 hybrid-* 的文本提取使用小模型（默认 false），在极端场景可降低幻觉。
 
 Test Cuda (optional):
 
