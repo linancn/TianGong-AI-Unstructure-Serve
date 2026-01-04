@@ -37,7 +37,7 @@
   - 统一调度 OpenAI、Gemini、vLLM 视觉大模型；OpenAI 与 vLLM 通过 `vision_service_openai_compatible.py` 共用 OpenAI-compatible 客户端池（支持多个 base_url 轮询），OpenAI 需配置 `OPENAI_API_KEY`，vLLM 使用 `VLLM_BASE_URLS`/`VLLM_BASE_URL`（可逗号分隔）或 `VLLM_API_KEY`。
   - 提示词构建集中在 `vision_prompts.py`，默认文案已明确要求模型直接输出核心洞察，禁止使用“根据您提供的上下文信息”“以下是”等前置客套语。
   - 当 vLLM 仅提供 base_url 而未配置密钥时，会使用占位 key（`not-required`）落到相同的 OpenAI-compatible 请求路径。
-  - `/mineru_with_images` 的图像描述会按 `VISION_BATCH_SIZE` 分批并发调用视觉服务（默认 3、下限 1），批内使用线程池并在达到批大小或遇到非图像块时刷新，可根据限流要求调整。
+  - `/mineru_with_images` 的图像描述按 `VISION_BATCH_SIZE` 分批并发调用视觉服务（默认 3、下限 1），上下文在调用前统一基于文本/列表/表格/图像 caption 计算（受 `VISION_CONTEXT_WINDOW` 控制），不会再把已生成的视觉描述写回上下文；图片无需连续也可并行，识别结果最终按原文顺序回填。
 
 ## 配置与敏感信息
 - 所有默认配置来自 `.secrets/secrets.toml`，通过 `src/config/config.py` 读取；文件顶部会先 `load_dotenv()`，确保 `.env` 环境变量优先级更高（容器/CI 可直接覆盖）。敏感字段包括 FASTAPI Bearer Token、OpenAI/Gemini/VLLM API Key 等。

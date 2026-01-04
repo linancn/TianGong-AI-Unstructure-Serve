@@ -283,51 +283,78 @@ def parse_with_images(
     with tempfile.TemporaryDirectory() as tmp_dir:
         content_list, output_dir, _ = parse_doc([file_path], tmp_dir, backend=backend)
 
-        working_blocks = _build_context_blocks(content_list)
-        item_to_block_idx = _reindex_blocks(working_blocks)
-
-        result_items: List[Dict[str, object]] = []
-        total_images = sum(
-            1
-            for item in content_list
-            if item["type"] == "image" and item.get("img_path") and item["img_path"].strip()
-        )
-        image_count = 0
+        context_blocks = _build_context_blocks(content_list)
+        item_to_block_idx = _reindex_blocks(context_blocks)
 
         prompt_override = (
             vision_prompt.strip() if vision_prompt is not None and vision_prompt.strip() else None
         )
 
-        pending_jobs: List[Dict[str, object]] = []
+        image_jobs: List[Dict[str, object]] = []
+        for item in content_list:
+            if not (item["type"] == "image" and item.get("img_path") and item["img_path"].strip()):
+                continue
 
-        def _flush_batch() -> None:
-            nonlocal working_blocks, item_to_block_idx, pending_jobs, image_count
-            if not pending_jobs:
-                return
+            img_path = os.path.join(output_dir, item["img_path"])
+            page_number = int(item.get("page_idx", 0)) + 1
+            if not os.path.exists(img_path):
+                logger.info(f"Skipping image on page {page_number}: file not found at {img_path}")
+                continue
+
+            cur_idx = item_to_block_idx.get(id(item))
+            contexts = _resolve_context_windows(context_blocks, cur_idx, item)
+            context_payload, prompt_parts = _build_vision_prompt(item, contexts)
+            _log_vision_prompt(page_number, contexts, prompt_parts)
 
             logger.info(
-                f"Dispatching batch of {len(pending_jobs)} images "
+                f"Queueing image {len(image_jobs) + 1} "
+                f"(page {page_number}, batch size {VISION_BATCH_SIZE})..."
+            )
+
+            image_jobs.append(
+                {
+                    "item": item,
+                    "page_number": page_number,
+                    "is_title": bool(item.get("text_level") is not None),
+                    "img_path": img_path,
+                    "context_payload": context_payload,
+                    "base_text": image_text(item),
+                }
+            )
+
+        for idx, job in enumerate(image_jobs, start=1):
+            job["seq"] = idx
+
+        total_images = len(image_jobs)
+        image_results: Dict[int, Dict[str, object]] = {}
+        image_count = 0
+
+        for start in range(0, total_images, VISION_BATCH_SIZE):
+            batch = image_jobs[start : start + VISION_BATCH_SIZE]
+            if not batch:
+                continue
+
+            logger.info(
+                f"Dispatching batch of {len(batch)} images "
                 f"(total={total_images}, processed={image_count})..."
             )
 
             with ThreadPoolExecutor(max_workers=VISION_BATCH_SIZE) as executor:
-                futures = []
-                for job in pending_jobs:
-                    futures.append(
-                        executor.submit(
-                            vision_completion,
-                            job["img_path"],
-                            job["context_payload"],
-                            prompt_override,
-                            vision_provider,
-                            vision_model,
-                        )
+                futures = [
+                    executor.submit(
+                        vision_completion,
+                        job["img_path"],
+                        job["context_payload"],
+                        prompt_override,
+                        vision_provider,
+                        vision_model,
                     )
+                    for job in batch
+                ]
 
-                for job, future in zip(pending_jobs, futures):
+                for job, future in zip(batch, futures):
                     seq = job["seq"]
                     page_number = job["page_number"]
-                    item = job["item"]
                     base_text = job["base_text"]
                     is_title = job["is_title"]
 
@@ -340,18 +367,6 @@ def parse_with_images(
                         vision_result = clean_text(future.result())
                         logger.info(f"✓ Vision analysis complete for image {seq}/{total_images}")
 
-                        vision_block = {
-                            "type": "image_vision_desc",
-                            "text": vision_result,
-                            "page_idx": item.get("page_idx", -1),
-                            "orig_item": item,
-                            "is_title": False,
-                        }
-                        cur_idx = item_to_block_idx.get(id(item))
-                        insert_idx = cur_idx + 1 if cur_idx is not None else len(working_blocks)
-                        working_blocks.insert(insert_idx, vision_block)
-                        item_to_block_idx = _reindex_blocks(working_blocks)
-
                         vision_summary = vision_result.strip()
                         if base_text and vision_summary:
                             combined_text = f"{base_text}\nImage Description: {vision_result}"
@@ -361,60 +376,34 @@ def parse_with_images(
                             combined_text = f"Image Description: {vision_result}"
                         else:
                             combined_text = ""
-                        if not combined_text:
-                            continue
-                        chunk = {"text": combined_text, "page_number": page_number}
-                        if chunk_type and is_title:
-                            chunk["type"] = "title"
-                        result_items.append(chunk)
+
+                        if combined_text:
+                            chunk = {"text": combined_text, "page_number": page_number}
+                            if chunk_type and is_title:
+                                chunk["type"] = "title"
+                            image_results[id(job["item"])] = chunk
                     except Exception as exc:  # noqa: BLE001 - vision call can fail
                         logger.info(f"Error processing image {seq}/{total_images}: {str(exc)}")
                         if base_text.strip():
                             chunk = {"text": base_text, "page_number": page_number}
                             if chunk_type and is_title:
                                 chunk["type"] = "title"
-                            result_items.append(chunk)
+                            image_results[id(job["item"])] = chunk
 
-            image_count += len(pending_jobs)
-            pending_jobs = []
+            image_count += len(batch)
 
+        logger.info(f"Completed processing all {total_images} images")
+
+        result_items: List[Dict[str, object]] = []
         for item in content_list:
-            cur_idx = item_to_block_idx.get(id(item))
             page_number = int(item.get("page_idx", 0)) + 1
             is_title = item.get("type") == "text" and item.get("text_level") is not None
 
             if item["type"] == "image" and item.get("img_path") and item["img_path"].strip():
-                img_path = os.path.join(output_dir, item["img_path"])
-                if not os.path.exists(img_path):
-                    logger.info(
-                        f"Skipping image on page {page_number}: file not found at {img_path}"
-                    )
-                    continue
-
-                seq = len(pending_jobs) + image_count + 1
-                logger.info(f"Queueing image {seq}/{total_images} on page {page_number}...")
-
-                contexts = _resolve_context_windows(working_blocks, cur_idx, item)
-                context_payload, prompt_parts = _build_vision_prompt(item, contexts)
-                _log_vision_prompt(page_number, contexts, prompt_parts)
-
-                pending_jobs.append(
-                    {
-                        "item": item,
-                        "page_number": page_number,
-                        "is_title": is_title,
-                        "img_path": img_path,
-                        "context_payload": context_payload,
-                        "seq": seq,
-                        "base_text": image_text(item),
-                    }
-                )
-
-                if len(pending_jobs) >= VISION_BATCH_SIZE:
-                    _flush_batch()
-
+                chunk = image_results.get(id(item))
+                if chunk:
+                    result_items.append(chunk)
             elif item["type"] in ("header", "footer"):
-                _flush_batch()
                 if not chunk_type:
                     continue
                 header_txt = clean_text(item.get("text", ""))
@@ -427,7 +416,6 @@ def parse_with_images(
                     result_items.append(chunk)
 
             elif item["type"] == "list":
-                _flush_batch()
                 list_txt = list_text(item)
                 if list_txt.strip():
                     chunk = {"text": list_txt, "page_number": page_number}
@@ -436,7 +424,6 @@ def parse_with_images(
                     result_items.append(chunk)
 
             elif item["type"] in ("text", "equation") and item.get("text", "").strip():
-                _flush_batch()
                 chunk = {"text": clean_text(item["text"]), "page_number": page_number}
                 if chunk_type and is_title:
                     chunk["type"] = "title"
@@ -444,7 +431,6 @@ def parse_with_images(
             elif item["type"] == "table" and (
                 item.get("table_caption") or item.get("table_body") or item.get("table_footnote")
             ):
-                _flush_batch()
                 chunk = {"text": table_text(item), "page_number": page_number}
                 if chunk_type and is_title:
                     chunk["type"] = "title"
@@ -454,7 +440,6 @@ def parse_with_images(
                 and (item.get("img_caption") or item.get("img_footnote"))
                 and not (item.get("img_path") and item["img_path"].strip())
             ):
-                _flush_batch()
                 img_txt = image_text(item)
                 if img_txt.strip():
                     chunk = {"text": img_txt, "page_number": page_number}
@@ -462,8 +447,6 @@ def parse_with_images(
                         chunk["type"] = "title"
                     result_items.append(chunk)
 
-        _flush_batch()
-        logger.info(f"Completed processing all {total_images} images")
         txt_text = build_plain_text(result_items) if return_txt else None
         return result_items, txt_text
 
