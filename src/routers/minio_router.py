@@ -2,12 +2,12 @@ import base64
 import binascii
 import mimetypes
 import os
+import re
 from typing import Optional, Tuple
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
-from src.routers.weaviate_router import build_weaviate_collection_name
 from src.services.minio_storage import (
     MinioConfig,
     MinioObjectNotFound,
@@ -20,6 +20,33 @@ from src.services.minio_storage import (
 )
 
 router = APIRouter()
+
+_COLLECTION_NAME_RE = re.compile(r"^[A-Z][_0-9A-Za-z]*$")
+
+
+def build_storage_collection_name(base: str, user_id: str) -> str:
+    """
+    Build a sanitized collection namespace for MinIO operations.
+
+    The output:
+    - starts with an uppercase letter
+    - uses only letters/numbers/underscores
+    - prefixes user and collection with KB_ for consistency with previous storage paths
+    """
+    if not base:
+        base = "KB"
+    base_clean = re.sub(r"[^0-9A-Za-z_]", "_", base).upper() or "KB"
+
+    uid_clean = re.sub(r"[^0-9A-Za-z_]", "_", user_id).upper()
+
+    name = f"KB_{uid_clean}_{base_clean}"
+
+    if len(name) > 200:
+        name = name[:200]
+
+    if not _COLLECTION_NAME_RE.match(name):
+        raise ValueError(f"Illegal collection name after sanitation: {name}")
+    return name
 
 
 def _create_minio_context(
@@ -97,7 +124,7 @@ async def download_minio_file(
     ),
 ):
     try:
-        safe_collection = build_weaviate_collection_name(collection_name, user_id)
+        safe_collection = build_storage_collection_name(collection_name, user_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -153,7 +180,7 @@ def _upload_data_to_minio(
         raise HTTPException(status_code=400, detail="File content must not be empty.")
 
     try:
-        safe_collection = build_weaviate_collection_name(collection_name, user_id)
+        safe_collection = build_storage_collection_name(collection_name, user_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

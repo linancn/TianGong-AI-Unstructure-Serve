@@ -24,10 +24,6 @@ dependencies = [
     "mineru[all]",
     "python-docx",
     "pillow",
-    "beautifulsoup4",
-    "pandas",
-    "tiktoken",
-    "weaviate-client",
     "loguru",
     "torch",
     "protobuf",
@@ -49,7 +45,6 @@ line-length = 100
 exclude = '''
 (
 	^/\.venv/
-	| ^/weaviate/weaviate_data/
 )
 '''
 
