@@ -12,8 +12,6 @@
             "args": [
                 "src.main:app",
                 "--reload-exclude",
-                "weaviate/**",
-                "--reload-exclude",
                 "minio/**",
                 "--reload-exclude",
                 ".venv/**",
@@ -33,6 +31,7 @@
             "env": {
                 "PYDEVD_DISABLE_FILE_VALIDATION": "1",
                 "FASTAPI_AUTH": "false",
+                "CUDA_VISIBLE_DEVICES": "0,1,2,3"
             }
         }
     ]

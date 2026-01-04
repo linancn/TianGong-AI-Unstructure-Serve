@@ -1,10 +1,4 @@
 {
-  "files.watcherExclude": {
-    "**/weaviate/**": true
-  },
-  "search.exclude": {
-    "**/weaviate/**": true
-  },
   "python.analysis.extraPaths": [
     "./"
   ]

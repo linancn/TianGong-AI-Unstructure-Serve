@@ -37,6 +37,7 @@
   - 统一调度 OpenAI、Gemini、vLLM 视觉大模型；OpenAI 与 vLLM 通过 `vision_service_openai_compatible.py` 共用 OpenAI-compatible 客户端池（支持多个 base_url 轮询），OpenAI 需配置 `OPENAI_API_KEY`，vLLM 使用 `VLLM_BASE_URLS`/`VLLM_BASE_URL`（可逗号分隔）或 `VLLM_API_KEY`。
   - 提示词构建集中在 `vision_prompts.py`，默认文案已明确要求模型直接输出核心洞察，禁止使用“根据您提供的上下文信息”“以下是”等前置客套语。
   - 当 vLLM 仅提供 base_url 而未配置密钥时，会使用占位 key（`not-required`）落到相同的 OpenAI-compatible 请求路径。
+  - `/mineru_with_images` 的图像描述会按 `VISION_BATCH_SIZE` 分批并发调用视觉服务（默认 3、下限 1），批内使用线程池并在达到批大小或遇到非图像块时刷新，可根据限流要求调整。
 
 ## 配置与敏感信息
 - 所有默认配置来自 `.secrets/secrets.toml`，通过 `src/config/config.py` 读取；文件顶部会先 `load_dotenv()`，确保 `.env` 环境变量优先级更高（容器/CI 可直接覆盖）。敏感字段包括 FASTAPI Bearer Token、OpenAI/Gemini/VLLM API Key 等。
@@ -49,6 +50,7 @@
     - `MINERU_OFFICE_CONVERT_TIMEOUT_SECONDS`：LibreOffice Office→PDF 转换超时时间（默认 180s），超时会终止转换并返回 500。  
     - `OPENAI_API_KEY` / `GENIMI_API_KEY`：视觉/生成模型凭证，支持以环境变量覆盖默认 secrets。  
     - `VISION_PROVIDER_CHOICES`、`VISION_MODELS_*`：视觉模型白名单。  
+    - `VISION_BATCH_SIZE`：`/mineru_with_images` 视觉描述的批处理并发度（默认 3，最小 1），调整以配合模型限流。  
     - `VLLM_BASE_URL` / `VLLM_BASE_URLS` / `VLLM_API_KEY`：指定 vLLM 视觉服务地址/凭证，支持逗号分隔配置多实例，按轮询方式调用（`.secrets/secrets.toml` 支持 `BASE_URL` 与 `BASE_URLS` 两种字段）。  
     - `MINIO_*`：MinIO 凭证与目标桶。  
     - `CUDA_VISIBLE_DEVICES`：运行时显卡绑定。  
