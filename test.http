@@ -1,0 +1,11 @@
+### @Upload PDF and return text without saving to MinIO
+curl -X POST "http://localhost:8770/mineru/task" \
+  -F "file=@/path/to/sample.pdf" \
+  -F "chunk_type=false" \
+  -F "return_txt=false" \
+  -F "save_to_minio=false"
+
+### @Get Task Status
+curl -H "Authorization: Bearer $FASTAPI_BEARER_TOKEN" \
+  "http://localhost:8770/mineru/task/<task_id>?pretty=true"
+

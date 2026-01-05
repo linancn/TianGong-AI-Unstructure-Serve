@@ -45,3 +45,15 @@ class ResponseWithoutPageNum(BaseModel):
     def from_result(cls, result: List[Tuple[str, int]]):
         items = [TextElementWithoutPageNum(text=item) for item in result]
         return cls(result=items)
+
+
+class MineruTaskSubmitResponse(BaseModel):
+    task_id: str
+    state: str
+
+
+class MineruTaskStatusResponse(BaseModel):
+    task_id: str
+    state: str
+    result: Optional[ResponseWithPageNum] = None
+    error: Optional[str] = None

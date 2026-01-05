@@ -13,6 +13,8 @@ authors = [
     { name = "linancn" },
 ]
 dependencies = [
+    "celery[redis]",
+    "flower",
     "fastapi",
     "uvicorn[standard]",
     "gunicorn",

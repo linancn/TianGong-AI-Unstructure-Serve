@@ -154,3 +154,24 @@ docker run -d \
 # Run first time to download models
 MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=0 mineru-vllm-server --port 30000
 ```
+
+# Redis Server
+```bash
+docker run -d --name redis -p 6379:6379 redis:8
+```
+
+# Celery Worker
+```bash
+# GPU 调度内部会再起子进程，Celery worker 请用非 daemonic 池
+# 监听 urgent + normal + default 队列，priority=urgent 会落到 queue_urgent
+CELERY_BROKER_URL=redis://localhost:6379/0 \
+CELERY_TASK_MINERU_QUEUE=queue_normal \
+CELERY_TASK_URGENT_QUEUE=queue_urgent \
+uv run celery -A src.services.celery_app worker \
+-l info -Q queue_urgent,queue_normal,default -P solo -c 1 --prefetch-multiplier=1
+```
+
+# Celery Flower Monitoring
+```bash
+uv run celery -A src.services.celery_app flower --address=0.0.0.0 --port=5555
+```
