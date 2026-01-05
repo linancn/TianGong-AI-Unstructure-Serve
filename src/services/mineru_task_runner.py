@@ -61,13 +61,22 @@ def _prepare_markdown_payload(file_path: Path, chunk_type: bool, return_txt: boo
 
 
 def _parse_with_scheduler(
-    processing_path: str, chunk_type: bool, return_txt: bool, backend_value: str
+    processing_path: str,
+    chunk_type: bool,
+    return_txt: bool,
+    backend_value: str,
+    *,
+    pipeline: str = "default",
+    **scheduler_options: object,
 ) -> tuple[list[TextElementWithPageNum], Optional[str]]:
+    options = {k: v for k, v in scheduler_options.items() if v is not None}
     payload = scheduler.submit(
         processing_path,
+        pipeline=pipeline,
         chunk_type=chunk_type,
         return_txt=return_txt,
         backend=backend_value,
+        **options,
     ).result()
 
     ordered_chunks: list[dict] = []
@@ -147,6 +156,10 @@ def run_mineru_local_job(
     minio_prefix: Optional[str],
     minio_meta: Optional[str],
     backend_value: Optional[str] = None,
+    pipeline: str = "default",
+    vision_provider: Optional[str] = None,
+    vision_model: Optional[str] = None,
+    vision_prompt: Optional[str] = None,
 ) -> dict:
     """Execute MinerU parsing against a local file path.
 
@@ -166,6 +179,15 @@ def run_mineru_local_job(
     minio_context: Optional[MinioContext] = None
     minio_prefix_value: Optional[str] = None
     processing_path = source_path
+    scheduler_options: dict[str, object] = {}
+
+    if pipeline == "images":
+        if vision_provider:
+            scheduler_options["vision_provider"] = vision_provider
+        if vision_model:
+            scheduler_options["vision_model"] = vision_model
+        if vision_prompt:
+            scheduler_options["vision_prompt"] = vision_prompt
 
     try:
         if file_ext in MARKDOWN_EXTENSIONS:
@@ -188,7 +210,14 @@ def run_mineru_local_job(
             )
             minio_prefix_value = build_minio_prefix(filename, minio_prefix)
 
-        items, txt_text = _parse_with_scheduler(processing_path, chunk_type, return_txt, backend)
+        items, txt_text = _parse_with_scheduler(
+            processing_path,
+            chunk_type,
+            return_txt,
+            backend,
+            pipeline=pipeline,
+            **scheduler_options,
+        )
         minio_assets_summary = _maybe_upload_minio(
             minio_context=minio_context,
             minio_prefix_value=minio_prefix_value,

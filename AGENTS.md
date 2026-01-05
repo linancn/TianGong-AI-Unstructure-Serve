@@ -8,7 +8,7 @@
 - `src/main.py` 初始化根日志记录器为 INFO，并将 `httpx`/`httpcore` 日志级别降至 WARNING，避免打印请求详情。
 
 ## 目录速览
-- `src/routers/`：各业务路由。`mineru_router.py`/`mineru_sci_router.py`/`mineru_with_images_router.py` 针对不同解析流程，`mineru_task_router.py` 提供 MinerU Celery 入队与状态查询，`markdown_router.py` 负责 Markdown→DOCX，`minio_router.py` 负责对象存储操作，`gpu_router.py` 暴露调度状态，`health_router.py` 提供健康检查；`mineru_minio_utils.py` 复用 MinerU 解析的 MinIO 前后处理逻辑。
+- `src/routers/`：各业务路由。`mineru_router.py`/`mineru_sci_router.py`/`mineru_with_images_router.py` 针对不同解析流程，`mineru_task_router.py`/`mineru_with_images_task_router.py` 分别提供 MinerU 普通版与图像版的 Celery 入队与状态查询，`markdown_router.py` 负责 Markdown→DOCX，`minio_router.py` 负责对象存储操作，`gpu_router.py` 暴露调度状态，`health_router.py` 提供健康检查；`mineru_minio_utils.py` 复用 MinerU 解析的 MinIO 前后处理逻辑。
 - `src/services/`：服务层实现。包含 MinerU 解析全流程（含图片/科研版）、Markdown 生成、MinIO 封装、视觉模型调用及 GPU 调度；`celery_app.py` 提供 Celery 单例配置，`tasks/mineru_tasks.py`/`mineru_task_runner.py` 负责 MinerU 异步任务执行。
 - `src/utils/`：工具函数，例如统一 JSON 响应包装、Markdown 预处理、Office→PDF 转换、MinerU 支持文件扩展名查询、纯文本导出等。
 - `src/models/`：Pydantic 数据模型，描述 API 的入参与返回结构（如 `ResponseWithPageNum`（含可选 `txt`/`minio_assets` 字段）等）。
@@ -23,11 +23,11 @@
   - `/mineru` 与 `/mineru_with_images` 均支持 `save_to_minio` 与 `minio_*` 表单字段，成功时会在 `mineru/<文件名>`（可自定义 `minio_prefix`）下写入源 PDF、解析 JSON 与逐页 JPEG，并通过响应体的 `minio_assets` 摘要返回上传结果；当 `chunk_type=true` 时，写入 MinIO 的 `parsed.json` 会保留 `type` 字段（header/footer/title）以便下游消费。两者唯一差异是 `/mineru_with_images` 会额外调用视觉大模型（`pipeline="images"`）为图像生成描述。
   - 额外可选字段 `minio_meta` 会在 `save_to_minio=true` 时把传入字符串写入 `meta.txt`（与 `source.pdf` 同目录），返回的 `minio_assets.meta_object` 会指向该文件，便于下游查阅附加元信息；若 `save_to_minio=false`，后端会安全地忽略该字段，避免调用端因默认值冲突而报错。
   - `mineru_minio_utils.build_minio_prefix()` 支持保留 Unicode/中文字符及常见中文标点，但所有空格（含全角空格）都会被统一替换为 `_`，其余不可打印字符也会折叠为 `_` 并清理多余分隔符。对应校验见 `tests/test_mineru_minio_utils.py`。
-- **MinerU 异步队列**（`src/routers/mineru_task_router.py` + `src/services/tasks/mineru_tasks.py`）  
-  - 基于 Celery+Redis 提供 `/mineru/task` 入队与 `/mineru/task/{task_id}` 状态查询，返回 `task_id` 及 Celery `state`（PENDING/STARTED/SUCCESS/FAILURE 等）。  
+- **MinerU 异步队列**（`src/routers/mineru_task_router.py`/`mineru_with_images_task_router.py` + `src/services/tasks/mineru_tasks.py`）  
+  - 基于 Celery+Redis 提供 `/mineru/task` 与 `/mineru/task/{task_id}`（纯文本解析）以及 `/mineru_with_images/task` 与 `/mineru_with_images/task/{task_id}`（图像感知版）状态查询，返回 `task_id` 及 Celery `state`（PENDING/STARTED/SUCCESS/FAILURE 等）。  
   - 路由校验与同步接口一致：仅接受 `mineru_supported_extensions`/Office/Markdown，Markdown 不允许 `save_to_minio`。上传文件会落地到 `MINERU_TASK_STORAGE_DIR`（默认系统临时目录的 `tiangong_mineru_tasks` 子目录），Celery 任务结束后自动清理。  
   - `priority` 表单字段控制队列：`urgent` 走 `queue_urgent`，其他值走 `queue_normal`（可通过环境覆盖）。  
-  - 任务执行仍复用 `gpu_scheduler` 和 `mineru_task_runner.run_mineru_local_job`：Office 自动转 PDF，解析结果过滤页眉页脚规则与同步接口保持一致，支持 MinIO 上传与 `minio_meta` 写入。
+  - 任务执行仍复用 `gpu_scheduler` 和 `mineru_task_runner.run_mineru_local_job`：Office 自动转 PDF，解析结果过滤页眉页脚规则与同步接口保持一致，支持 MinIO 上传与 `minio_meta` 写入；图像版 Celery 任务（`mineru.parse_images`）会额外透传 `vision_provider`/`vision_model`/`vision_prompt` 到 `parse_with_images`。
 - **MinIO 对象操作**（`src/routers/minio_router.py`）  
   - 封装上传/下载所需的 endpoint 解析、bucket 校验与对象名规范化，所有异常以 HTTP 错误返回。  
   - `/minio/upload` 接收标准的 `UploadFile` 表单字段；`/minio/upload/base64` 提供 Base64 版入口（字段 `file_base64`，可选 `content_type_override`），两者共用内置工具完成对象存储写入并在内容为空时返回 400。  

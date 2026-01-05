@@ -23,3 +23,18 @@ def run_mineru_task(payload: Dict[str, Any]) -> dict:
     finally:
         if workspace:
             shutil.rmtree(workspace, ignore_errors=True)
+
+
+@celery_app.task(name="mineru.parse_images")
+def run_mineru_with_images_task(payload: Dict[str, Any]) -> dict:
+    """Celery entrypoint for MinerU image-aware parsing."""
+    task_payload = dict(payload or {})
+    workspace = task_payload.pop("workspace", None)
+    try:
+        return run_mineru_local_job(pipeline="images", **task_payload)
+    except MineruTaskError as exc:
+        logger.warning("MinerU task validation failed: %s", exc)
+        raise
+    finally:
+        if workspace:
+            shutil.rmtree(workspace, ignore_errors=True)
