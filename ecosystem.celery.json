@@ -1,0 +1,15 @@
+{
+  "apps": [
+    {
+      "name": "celery-worker",
+      "cwd": "/home/david/projects/TianGong-AI-Unstructure-Serve",
+      "script": ".venv/bin/celery",
+      "args": "-A src.services.celery_app worker -l info -Q queue_urgent,queue_normal,default -P solo -c 1 --prefetch-multiplier=1",
+      "env": {
+        "CELERY_BROKER_URL": "redis://localhost:6379/0",
+        "CELERY_TASK_MINERU_QUEUE": "queue_normal",
+        "CELERY_TASK_URGENT_QUEUE": "queue_urgent"
+      }
+    }
+  ]
+}
