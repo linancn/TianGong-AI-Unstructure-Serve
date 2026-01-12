@@ -85,6 +85,8 @@
   # 监控
   CELERY_BROKER_URL=redis://localhost:6379/0 uv run celery -A src.services.celery_app flower --address=0.0.0.0 --port=5555
   ```
+  - PM2 模板：`ecosystem.celery.json` 以 `.venv/bin/python` 作为 interpreter 执行 `.venv/bin/celery`，避免 PM2 默认用 Node 解释脚本导致 SyntaxError。
+  - Flower PM2 模板：`ecosystem.celery.flower.json` 同样用 `.venv/bin/python` 解释 `.venv/bin/celery`，默认 `--address=0.0.0.0 --port=5555`，环境中写死 broker/result backend 为本地 Redis。
 - 附属服务容器：  
   - Kroki（图表渲染）：`docker run -d -p 7999:8000 --restart unless-stopped yuzutech/kroki`  
   - Quickchart：`docker run -d -p 7998:3400 --restart unless-stopped ianw/quickchart`  

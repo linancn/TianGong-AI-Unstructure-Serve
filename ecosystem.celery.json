@@ -2,8 +2,9 @@
   "apps": [
     {
       "name": "celery-worker",
-      "cwd": "/home/david/projects/TianGong-AI-Unstructure-Serve",
+      "cwd": ".",
       "script": ".venv/bin/celery",
+      "interpreter": ".venv/bin/python",
       "args": "-A src.services.celery_app worker -l info -Q queue_urgent,queue_normal,default -P solo -c 1 --prefetch-multiplier=1",
       "env": {
         "CELERY_BROKER_URL": "redis://localhost:6379/0",
