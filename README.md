@@ -84,6 +84,7 @@ npm i -g pm2
 
 pm2 start ecosystem.vllm.config.json
 pm2 start ecosystem.config.json
+pm2 start ecosystem.celery.json
 
 pm2 start ecosystem.vllm.quatro.json
 pm2 start ecosystem.quatro.json
