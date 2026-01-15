@@ -10,15 +10,32 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-API_BASE = os.environ.get("MINERU_TASK_BASE", "http://localhost:7770").rstrip("/")
-SUBMIT_URL = f"{API_BASE}/mineru_with_images/task"
-LOG_FILE = "celery.log"
+API_BASE = (
+    os.environ.get("TWO_STAGE_BASE")
+    or os.environ.get("MINERU_TASK_BASE")
+    or "http://localhost:8770"
+).rstrip("/")
+SUBMIT_URL = f"{API_BASE}/two_stage/task"
+LOG_FILE = "celery_two_stage.log"
 DEFAULT_INPUT_DIR = Path("pdfs")
 DEFAULT_OUTPUT_DIR = Path("pickle")
-DEFAULT_INTERVAL = float(os.environ.get("MINERU_TASK_POLL_INTERVAL", 3))
-DEFAULT_TIMEOUT = float(os.environ.get("MINERU_TASK_POLL_TIMEOUT", 800))
+DEFAULT_INTERVAL = float(os.environ.get("TWO_STAGE_POLL_INTERVAL", 3))
+DEFAULT_TIMEOUT = float(os.environ.get("TWO_STAGE_POLL_TIMEOUT", 800))
+
 VISION_PROVIDER = (os.environ.get("VISION_PROVIDER") or "").strip()
 VISION_MODEL = (os.environ.get("VISION_MODEL") or "").strip()
+VISION_PROMPT = (os.environ.get("VISION_PROMPT") or "").strip()
+
+
+def _bool_env(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+CHUNK_TYPE = _bool_env("TWO_STAGE_CHUNK_TYPE", False)
+RETURN_TXT = _bool_env("TWO_STAGE_RETURN_TXT", False)
 
 logging.basicConfig(
     filename=LOG_FILE,
@@ -35,6 +52,12 @@ def _build_form_data() -> Dict[str, str]:
         form["provider"] = VISION_PROVIDER
     if VISION_MODEL:
         form["model"] = VISION_MODEL
+    if VISION_PROMPT:
+        form["prompt"] = VISION_PROMPT
+    if CHUNK_TYPE:
+        form["chunk_type"] = "true"
+    if RETURN_TXT:
+        form["return_txt"] = "true"
     return form
 
 
@@ -75,7 +98,7 @@ def fetch(
     start = time.time()
     while True:
         resp = session.get(
-            f"{API_BASE}/mineru_with_images/task/{task_id}",
+            f"{API_BASE}/two_stage/task/{task_id}",
             headers=headers,
             timeout=30000,
         )
@@ -83,7 +106,7 @@ def fetch(
         data = resp.json()
         state = data["state"]
         if state == "SUCCESS":
-            return data.get("result") or data.get("Result")  # 包含 result/txt/minio_assets
+            return data.get("result") or data.get("Result")
         if state in {"FAILURE", "REVOKED"}:
             raise RuntimeError(f"Task failed: {data.get('error')}")
         if time.time() - start > timeout:
@@ -120,7 +143,6 @@ def main() -> None:
         tasks: Dict[str, Path] = {}
         start_times: Dict[str, float] = {}
 
-        # 先把所有 PDF 送进队列
         for pdf_path in pdfs:
             task_id = submit_task(session, pdf_path, token)
             tasks[task_id] = pdf_path
@@ -130,7 +152,9 @@ def main() -> None:
             logging.info("All PDFs already processed under %s", input_dir)
             return
 
-        # 轮询所有任务，直到完成或失败
+        successes: Dict[str, Path] = {}
+        failures: Dict[str, str] = {}
+
         while tasks:
             finished: Dict[str, Path] = {}
             for task_id, pdf_path in list(tasks.items()):
@@ -150,17 +174,27 @@ def main() -> None:
                         pickle.dump(result, f)
                     logging.info("Wrote %s", pickle_path)
                     finished[task_id] = pdf_path
+                    successes[task_id] = pdf_path
                 except TimeoutError:
-                    raise
+                    logging.error("Task %s timed out after %.1fs", task_id, DEFAULT_TIMEOUT)
+                    finished[task_id] = pdf_path
+                    failures[task_id] = "timeout"
                 except Exception as exc:
                     logging.error("Failed to process %s (task %s): %s", pdf_path, task_id, exc)
-                    raise
+                    finished[task_id] = pdf_path
+                    failures[task_id] = str(exc)
 
             for task_id in finished:
                 tasks.pop(task_id, None)
 
             if tasks:
                 time.sleep(DEFAULT_INTERVAL)
+
+        logging.info(
+            "Finished two-stage enqueue: %d successes, %d failures.", len(successes), len(failures)
+        )
+        for task_id, err in failures.items():
+            logging.error("Task %s failed: %s", task_id, err)
     finally:
         session.close()
 

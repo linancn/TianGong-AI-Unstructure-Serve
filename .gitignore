@@ -149,6 +149,7 @@ dmypy.json
 output
 input
 pdfs
+pickle
 
 download_models_hf.py
 

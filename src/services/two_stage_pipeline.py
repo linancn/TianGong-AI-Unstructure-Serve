@@ -1,0 +1,381 @@
+"""
+Two-stage MinerU+vision Celery pipeline (解析队列 + 视觉队列 + 汇总).
+
+- 解析任务只占用 GPU 队列，产出 content_list + 图片元数据，不做视觉调用。
+- 视觉任务在独立队列并发调用 vision_completion。
+- merge 任务按 seq 回填视觉结果并清理临时目录。
+
+环境变量：
+  CELERY_TASK_PARSE_QUEUE（默认使用 CELERY_TASK_MINERU_QUEUE 或 queue_parse_gpu）
+  CELERY_TASK_VISION_QUEUE（默认 queue_vision）
+  CELERY_TASK_DISPATCH_QUEUE（默认 CELERY_TASK_DEFAULT_QUEUE 或 default）
+  CELERY_TASK_MERGE_QUEUE（默认 CELERY_TASK_DEFAULT_QUEUE 或 default）
+  MINERU_TASK_STORAGE_DIR（默认 /tmp/tiangong_mineru_tasks）
+"""
+
+import os
+import shutil
+import uuid
+from pathlib import Path
+from typing import Dict, List, Optional, Sequence, Union
+
+from celery import Celery, chord, chain
+from loguru import logger
+
+from src.config.config import (
+    CELERY_BROKER_URL,
+    CELERY_RESULT_BACKEND,
+    CELERY_TASK_DEFAULT_QUEUE,
+    CELERY_TASK_MINERU_QUEUE,
+    MINERU_TASK_STORAGE_DIR,
+)
+from src.models.models import TextElementWithPageNum
+from src.services.mineru_service_full import parse_doc
+from src.services.mineru_with_images_service import (
+    _build_context_blocks,
+    _build_vision_prompt,
+    _reindex_blocks,
+    _resolve_context_windows,
+    clean_text,
+    image_text,
+    list_text,
+    table_text,
+)
+from src.services.vision_service import VisionModel, VisionProvider, vision_completion
+from src.utils.text_output import build_plain_text
+
+PARSE_QUEUE = os.getenv("CELERY_TASK_PARSE_QUEUE", CELERY_TASK_MINERU_QUEUE or "queue_parse_gpu")
+VISION_QUEUE = os.getenv("CELERY_TASK_VISION_QUEUE", "queue_vision")
+DISPATCH_QUEUE = os.getenv("CELERY_TASK_DISPATCH_QUEUE", CELERY_TASK_DEFAULT_QUEUE or "default")
+MERGE_QUEUE = os.getenv("CELERY_TASK_MERGE_QUEUE", CELERY_TASK_DEFAULT_QUEUE or "default")
+
+celery_app = Celery(
+    "mineru_two_stage",
+    broker=CELERY_BROKER_URL,
+    backend=CELERY_RESULT_BACKEND,
+)
+
+celery_app.conf.update(
+    task_serializer="json",
+    result_serializer="json",
+    accept_content=["json"],
+    task_default_queue=CELERY_TASK_DEFAULT_QUEUE or "default",
+    task_track_started=True,
+    task_routes={
+        "two_stage.parse": {"queue": PARSE_QUEUE},
+        "two_stage.vision": {"queue": VISION_QUEUE},
+        "two_stage.merge": {"queue": MERGE_QUEUE},
+        "two_stage.dispatch": {"queue": DISPATCH_QUEUE},
+    },
+)
+
+
+def _ensure_workspace(existing: Optional[str] = None) -> Path:
+    root = Path(MINERU_TASK_STORAGE_DIR)
+    root.mkdir(parents=True, exist_ok=True)
+    if existing:
+        workspace = Path(existing)
+        workspace.mkdir(parents=True, exist_ok=True)
+        return workspace
+    workspace = root / uuid.uuid4().hex
+    workspace.mkdir(parents=True, exist_ok=False)
+    return workspace
+
+
+def _build_image_jobs(content_list: List[Dict], output_dir: str) -> tuple[List[Dict], List[Dict]]:
+    """Prepare image jobs with context and stable seq, and annotate content_list with seq."""
+    context_blocks = _build_context_blocks(content_list)
+    idx_map = _reindex_blocks(context_blocks)
+    image_jobs: List[Dict] = []
+    seq = 1
+
+    for item in content_list:
+        if item.get("type") != "image" or not (item.get("img_path") and item["img_path"].strip()):
+            continue
+
+        img_path = os.path.join(output_dir, item["img_path"])
+        if not os.path.exists(img_path):
+            logger.info("Skipping missing image at %s", img_path)
+            continue
+
+        cur_idx = idx_map.get(id(item))
+        contexts = _resolve_context_windows(context_blocks, cur_idx, item)
+        context_payload, _ = _build_vision_prompt(item, contexts)
+
+        item["__image_seq"] = seq
+        image_jobs.append(
+            {
+                "seq": seq,
+                "page_number": int(item.get("page_idx", 0)) + 1,
+                "is_title": bool(item.get("text_level") is not None),
+                "img_path": img_path,
+                "context_payload": context_payload,
+                "base_text": image_text(item),
+            }
+        )
+        seq += 1
+
+    return image_jobs, content_list
+
+
+def _merge_content(
+    content_list: List[Dict],
+    vision_results: Sequence[Dict],
+    *,
+    chunk_type: bool,
+    return_txt: bool,
+) -> tuple[List[TextElementWithPageNum], Optional[str]]:
+    vision_map = {entry.get("seq"): entry.get("vision_text") for entry in vision_results if entry}
+    result_items: List[Dict[str, object]] = []
+
+    for item in content_list:
+        page_number = int(item.get("page_idx", 0)) + 1
+        is_title = item.get("type") == "text" and item.get("text_level") is not None
+
+        if item.get("type") == "image" and item.get("img_path") and item["img_path"].strip():
+            seq = item.get("__image_seq")
+            base_text = image_text(item)
+            vision_text = vision_map.get(seq, "")
+            if base_text and vision_text:
+                combined_text = f"{base_text}\nImage Description: {vision_text}"
+            elif base_text:
+                combined_text = base_text
+            else:
+                combined_text = vision_text or ""
+
+            if combined_text.strip():
+                chunk = {"text": clean_text(combined_text), "page_number": page_number}
+                if chunk_type and is_title:
+                    chunk["type"] = "title"
+                result_items.append(chunk)
+        elif item.get("type") in ("header", "footer"):
+            if not chunk_type:
+                continue
+            header_txt = clean_text(item.get("text", ""))
+            if header_txt.strip():
+                result_items.append(
+                    {"text": header_txt, "page_number": page_number, "type": item["type"]}
+                )
+        elif item.get("type") == "list":
+            list_txt = list_text(item)
+            if list_txt.strip():
+                chunk = {"text": list_txt, "page_number": page_number}
+                if chunk_type and is_title:
+                    chunk["type"] = "title"
+                result_items.append(chunk)
+        elif item.get("type") in ("text", "equation") and item.get("text", "").strip():
+            chunk = {"text": clean_text(item["text"]), "page_number": page_number}
+            if chunk_type and is_title:
+                chunk["type"] = "title"
+            result_items.append(chunk)
+        elif item.get("type") == "table" and (
+            item.get("table_caption") or item.get("table_body") or item.get("table_footnote")
+        ):
+            chunk = {"text": table_text(item), "page_number": page_number}
+            if chunk_type and is_title:
+                chunk["type"] = "title"
+            result_items.append(chunk)
+        elif (
+            item.get("type") == "image"
+            and (item.get("img_caption") or item.get("img_footnote"))
+            and not (item.get("img_path") and item["img_path"].strip())
+        ):
+            img_txt = image_text(item)
+            if img_txt.strip():
+                chunk = {"text": img_txt, "page_number": page_number}
+                if chunk_type and is_title:
+                    chunk["type"] = "title"
+                result_items.append(chunk)
+
+    if chunk_type:
+        result_items.sort(key=lambda ch: 0 if ch.get("type") == "header" else 1)
+
+    items = [
+        TextElementWithPageNum(
+            text=chunk["text"],
+            page_number=int(chunk["page_number"]),
+            type=chunk.get("type") if chunk_type else None,
+        )
+        for chunk in result_items
+    ]
+    txt_text = build_plain_text(items) if return_txt else None
+    return items, txt_text
+
+
+def _normalize_prompt(prompt: Optional[str]) -> Optional[str]:
+    if prompt is None:
+        return None
+    normalized = prompt.strip()
+    return normalized or None
+
+
+@celery_app.task(name="two_stage.parse", acks_late=True)
+def parse_task(payload: Dict[str, object]) -> Dict[str, object]:
+    """Stage 1: MinerU parse only, no vision calls."""
+    source_path = Path(payload["source_path"])
+    backend = payload.get("backend")
+    chunk_type = bool(payload.get("chunk_type"))
+    return_txt = bool(payload.get("return_txt"))
+    workspace_hint = payload.get("workspace")
+    cleanup_source = bool(payload.get("cleanup_source"))
+    extra_cleanup = list(payload.get("extra_cleanup") or [])
+
+    workspace = _ensure_workspace(existing=workspace_hint)
+    target_path = workspace / source_path.name
+    if source_path != target_path:
+        shutil.copy2(source_path, target_path)
+    if cleanup_source:
+        try:
+            source_path.unlink()
+        except FileNotFoundError:
+            pass
+        except Exception:
+            logger.debug("Failed to remove source file %s", source_path)
+
+    logger.info("Parsing %s into workspace %s", target_path, workspace)
+    try:
+        response = parse_doc([target_path], workspace, backend=backend)
+    except Exception as exc:
+        size_hint = None
+        try:
+            size_hint = target_path.stat().st_size
+        except Exception:
+            size_hint = "unknown"
+        raise RuntimeError(
+            f"parse_doc raised for {target_path} (size={size_hint} bytes): {exc}"
+        ) from exc
+
+    if not response:
+        raise RuntimeError(f"parse_doc returned no content for {target_path}")
+
+    try:
+        content_list, output_dir, _ = response
+    except Exception as exc:
+        raise RuntimeError(f"Unexpected parse_doc payload for {target_path}: {response!r}") from exc
+
+    if content_list is None:
+        raise RuntimeError("parse_doc returned empty content_list.")
+
+    image_jobs, annotated_content = _build_image_jobs(content_list, output_dir or str(workspace))
+    logger.info("Parsed %s: %d images found", target_path, len(image_jobs))
+
+    return {
+        "workspace": str(workspace),
+        "upload_workspace": payload.get("upload_workspace"),
+        "extra_cleanup": extra_cleanup,
+        "content_list": annotated_content,
+        "image_jobs": image_jobs,
+        "chunk_type": chunk_type,
+        "return_txt": return_txt,
+    }
+
+
+@celery_app.task(name="two_stage.vision", acks_late=True)
+def vision_task(
+    job: Dict[str, object],
+    provider: Optional[Union[VisionProvider, str]] = None,
+    model: Optional[Union[VisionModel, str]] = None,
+    prompt: Optional[str] = None,
+) -> Dict[str, object]:  # type: ignore[override]
+    """Stage 2 header: run vision model for one image."""
+    seq = job.get("seq")
+    prompt_override = _normalize_prompt(prompt)
+    try:
+        vision_text = vision_completion(
+            job["img_path"],
+            job.get("context_payload", "") or "",
+            prompt=prompt_override,
+            provider=provider,
+            model=model,
+        )
+        return {"seq": seq, "vision_text": vision_text}
+    except Exception as exc:  # noqa: BLE001 - external call may fail
+        logger.info("Vision call failed for seq=%s: %s", seq, exc)
+        return {"seq": seq, "vision_text": job.get("base_text") or "", "error": str(exc)}
+
+
+@celery_app.task(name="two_stage.merge", acks_late=True)
+def merge_task(
+    vision_results: Sequence[Dict], parse_payload: Dict[str, object]
+) -> Dict[str, object]:
+    """Stage 2 body: merge vision outputs back into parsed content."""
+    items, txt_text = _merge_content(
+        parse_payload["content_list"],
+        vision_results,
+        chunk_type=bool(parse_payload.get("chunk_type")),
+        return_txt=bool(parse_payload.get("return_txt")),
+    )
+
+    workspace = parse_payload.get("workspace")
+    if workspace:
+        shutil.rmtree(workspace, ignore_errors=True)
+    upload_workspace = parse_payload.get("upload_workspace")
+    if upload_workspace:
+        shutil.rmtree(upload_workspace, ignore_errors=True)
+    for path in parse_payload.get("extra_cleanup") or []:
+        try:
+            Path(path).unlink()
+        except FileNotFoundError:
+            pass
+        except Exception:
+            logger.debug("Failed to remove cleanup path %s", path)
+
+    return {
+        "result": [item.model_dump() for item in items],
+        "txt": txt_text,
+        "minio_assets": None,
+    }
+
+
+@celery_app.task(name="two_stage.dispatch", acks_late=True)
+def dispatch(
+    parse_payload: Dict[str, object],
+    provider: Optional[Union[VisionProvider, str]] = None,
+    model: Optional[Union[VisionModel, str]] = None,
+    prompt: Optional[str] = None,
+) -> Dict[str, object]:  # type: ignore[override]
+    """Kick off vision fan-out + merge; blocks until merge completes."""
+    image_jobs: List[Dict[str, object]] = parse_payload.get("image_jobs") or []
+    prompt_override = _normalize_prompt(prompt)
+    if not image_jobs:
+        return merge_task.apply_async(args=[[], parse_payload], queue=MERGE_QUEUE).get()
+
+    header = [
+        vision_task.s(job, provider=provider, model=model, prompt=prompt_override).set(
+            queue=VISION_QUEUE
+        )
+        for job in image_jobs
+    ]
+    async_result = chord(header)(merge_task.s(parse_payload).set(queue=MERGE_QUEUE))
+    return async_result.get(disable_sync_subtasks=False)
+
+
+def submit_two_stage_job(
+    source_path: str,
+    *,
+    backend: Optional[str] = None,
+    chunk_type: bool = False,
+    return_txt: bool = False,
+    provider: Optional[Union[VisionProvider, str]] = None,
+    model: Optional[Union[VisionModel, str]] = None,
+    prompt: Optional[str] = None,
+    workspace: Optional[str] = None,
+    cleanup_source: bool = False,
+    extra_cleanup: Optional[Sequence[str]] = None,
+):
+    """Enqueue two-stage workflow; returns AsyncResult for the final merge."""
+    payload = {
+        "source_path": source_path,
+        "backend": backend,
+        "chunk_type": chunk_type,
+        "return_txt": return_txt,
+        "workspace": workspace,
+        "upload_workspace": workspace,
+        "cleanup_source": cleanup_source,
+        "extra_cleanup": list(extra_cleanup or []),
+    }
+    workflow = chain(
+        parse_task.s(payload).set(queue=PARSE_QUEUE),
+        dispatch.s(provider=provider, model=model, prompt=prompt).set(queue=DISPATCH_QUEUE),
+    )
+    return workflow.apply_async()

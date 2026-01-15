@@ -518,12 +518,13 @@ def parse_doc(
             f_log_debug_intermediate=log_debug_intermediate,
         )
         if response is None:
-            return None, None, None
+            raise RuntimeError("do_parse returned None")
 
         content_list, output_dir_path = response
         return content_list, output_dir_path, None
     except Exception as e:
         logger.exception(e)
+        raise
 
 
 if __name__ == "__main__":

@@ -1,0 +1,48 @@
+{
+  "apps": [
+    {
+      "name": "celery-two-stage-parse",
+      "cwd": ".",
+      "script": ".venv/bin/celery",
+      "interpreter": ".venv/bin/python",
+      "args": "-A src.services.two_stage_pipeline worker -n parse@%h -l info -Q queue_parse_gpu -P solo --prefetch-multiplier=1",
+      "env": {
+        "CELERY_BROKER_URL": "redis://localhost:6379/0",
+        "CELERY_TASK_PARSE_QUEUE": "queue_parse_gpu"
+      }
+    },
+    {
+      "name": "celery-two-stage-vision",
+      "cwd": ".",
+      "script": ".venv/bin/celery",
+      "interpreter": ".venv/bin/python",
+      "args": "-A src.services.two_stage_pipeline worker -n vision@%h -l info -Q queue_vision -P threads -c 32 --prefetch-multiplier=1",
+      "env": {
+        "CELERY_BROKER_URL": "redis://localhost:6379/0",
+        "CELERY_TASK_VISION_QUEUE": "queue_vision"
+      }
+    },
+    {
+      "name": "celery-two-stage-dispatch",
+      "cwd": ".",
+      "script": ".venv/bin/celery",
+      "interpreter": ".venv/bin/python",
+      "args": "-A src.services.two_stage_pipeline worker -n dispatch@%h -l info -Q queue_dispatch -P threads -c 4 --prefetch-multiplier=1",
+      "env": {
+        "CELERY_BROKER_URL": "redis://localhost:6379/0",
+        "CELERY_TASK_DISPATCH_QUEUE": "queue_dispatch"
+      }
+    },
+    {
+      "name": "celery-two-stage-merge",
+      "cwd": ".",
+      "script": ".venv/bin/celery",
+      "interpreter": ".venv/bin/python",
+      "args": "-A src.services.two_stage_pipeline worker -n merge@%h -l info -Q default -P threads -c 4 --prefetch-multiplier=1",
+      "env": {
+        "CELERY_BROKER_URL": "redis://localhost:6379/0",
+        "CELERY_TASK_MERGE_QUEUE": "default"
+      }
+    }
+  ]
+}

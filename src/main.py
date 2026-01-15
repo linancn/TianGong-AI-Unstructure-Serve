@@ -17,6 +17,7 @@ from src.routers import (
     mineru_sci_router,
     mineru_with_images_router,
     minio_router,
+    two_stage_router,
     gpu_router,
 )
 
@@ -72,3 +73,4 @@ app.include_router(mineru_with_images_router.router)
 app.include_router(mineru_with_images_task_router.router)
 app.include_router(minio_router.router)
 app.include_router(gpu_router.router)
+app.include_router(two_stage_router.router)

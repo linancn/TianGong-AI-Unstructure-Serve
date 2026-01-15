@@ -81,10 +81,13 @@ nohup env MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=1 uvicorn src.main
 nohup env MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=2 uvicorn src.main:app --host 0.0.0.0 --port 8772 > uvicorn.log 2>&1 &
 
 npm i -g pm2
+watch -n 1 nvidia-smi
 
 pm2 start ecosystem.vllm.config.json
 pm2 start ecosystem.config.json
 pm2 start ecosystem.celery.json
+pm2 start ecosystem.two_stage.celery.json  # includes separate dispatch + merge workers; dispatch 不再订阅 default，避免阻塞 merge。
+pm2 start ecosystem.celery.flower.json
 
 pm2 start ecosystem.vllm.quatro.json
 pm2 start ecosystem.quatro.json
