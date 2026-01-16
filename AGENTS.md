@@ -49,7 +49,7 @@
   - Worker 示例（可按需调整并发）：解析队列 `celery -A src.services.two_stage_pipeline worker -Q queue_parse_gpu -P threads -c 1 -l info`；视觉队列 `celery -A src.services.two_stage_pipeline worker -Q queue_vision -P threads -c 32 -l info`；调度队列 `celery -A src.services.two_stage_pipeline worker -Q queue_dispatch -P threads -c 4 -l info`；汇总队列（处理 merge）`celery -A src.services.two_stage_pipeline worker -Q default -P threads -c 4 -l info`。调度与汇总拆分可避免 dispatch 阻塞 merge 导致 chord 一直处于 active 状态。`submit_two_stage_job` 帮助方法可直接在代码中调用。  
   - 该示例用于解耦 MinerU 解析与视觉阶段，避免 GPU 和视觉卡互相空转；已通过 `main.py` 暴露路由，可直接在现有服务中访问 `/two_stage/*`，也可按需用独立入口部署。
   - 两段式解析中如 MinerU 抛异常或未返回内容，`parse_doc` 会直接抛出 `RuntimeError`（包含 “do_parse returned None” 等提示），并将异常继续冒泡，`two_stage.parse` 会捕获并带上源文件路径返回给 Flower，避免再出现 “cannot unpack non-iterable NoneType object” 之类的报错。视觉阶段与 `/mineru_with_images` 对齐：`provider`/`model`/`prompt`（空字符串会清空为 None）会透传给 `vision_completion`，可通过请求参数或 `VISION_PROVIDER`/`VISION_MODEL` 环境变量指定模型；路由层使用 `VisionProvider`/`VisionModel` 进行校验，Swagger 会给出枚举提示。  
-  - 视觉合并规则：若原图有 caption/footnote 则合并为 `<原文本>\nImage Description: <视觉输出>`；无原始文本时直接用视觉输出，默认不带 `type`，`chunk_type=true` 仅为标题/页眉/页脚打标。  
+  - 视觉合并规则：若原图有 caption/footnote 则合并为 `<原文本>\nImage Description: <视觉输出>`；无原始文本时直接用视觉输出，默认不带 `type`，`chunk_type=true` 仅为标题/页眉/页脚打标。视觉调用前会过滤图片：面积占比过小（默认 <1%，有 caption 放宽到 0.5%）、极端长宽比（>10:1）、无 caption 且体积过小（默认 <10KB）、固有分辨率过小（最短边 <96px 或像素面积过小）直接跳过；同页超过 5 张也会限流，并按文件哈希去重，减少 logo/边框等噪声送入视觉模型。  
 - PM2 模板：`ecosystem.two_stage.celery.json`（三类 worker）和 `ecosystem.two_stage.flower.json`（两段式 Flower，默认 5556 端口，继承两段式队列环境）。
 
 ## 配置与敏感信息
@@ -108,7 +108,8 @@
   uv run --group dev ruff check src
   uv run --group dev pytest
   ```
-- 新增的 `tests/` Pytest 测试工程覆盖配置环境变量覆盖逻辑、Markdown/文件转换工具、MinIO 封装、Pydantic 模型以及 `/health`、`/gpu/status` 等轻量路由；`tests/conftest.py` 会注入轻量替身（GPU 调度器、MinIO/pypdfium2 stub），无需真实外部依赖即可运行。两段式相关：`tests/test_two_stage_router.py` 覆盖 `/two_stage/task` 的无扩展名错误与成功入队（通过 monkeypatch stub 掉 Celery 调度），批量送入两段式 Celery 的脚本移到 `src/scripts/two_stage_enqueue.py`（读取 `pdfs` 目录提交 `/two_stage/task`，轮询完成后将响应中的 result 持久化到 `pickle/<stem>.pkl`，默认遇到失败会记录并继续其余文件，支持 `TWO_STAGE_*` 环境覆盖）；`tests/test_two_stage_pipeline_parse.py` 验证 MinerU 返回空/异常时的错误传播，确保任务失败能在 Flower 中看到具体原因。
+- 新增的 `tests/` Pytest 测试工程覆盖配置环境变量覆盖逻辑、Markdown/文件转换工具、MinIO 封装、Pydantic 模型以及 `/health`、`/gpu/status` 等轻量路由；`tests/conftest.py` 会注入轻量替身（GPU 调度器、MinIO/pypdfium2 stub），无需真实外部依赖即可运行。两段式相关：`tests/test_two_stage_router.py` 覆盖 `/two_stage/task` 的无扩展名错误与成功入队（通过 monkeypatch stub 掉 Celery 调度），批量送入两段式 Celery 的脚本移到 `src/scripts/two_stage_enqueue.py`（读取 `pdfs` 目录提交 `/two_stage/task`，轮询完成后将响应中的 result 持久化到 `pickle/<stem>.pkl`，失败/超时会在脚本内自动重试至多 3 次，超限后记录并继续其余文件，支持 `TWO_STAGE_*` 环境覆盖）；`tests/test_two_stage_pipeline_parse.py` 验证 MinerU 返回空/异常时的错误传播，确保任务失败能在 Flower 中看到具体原因。
+- `src/scripts/read_pickle.py` 可将 pickle 文件转存为 JSON，默认输出到同名 `.json` 文件；可用 `--field result` 仅导出解析结果，`-o` 自定义输出路径。未传入参数时会自动选择 `./pickle` 目录下最新的 `.pkl` 进行转换，便于直接查看两段式任务落地的 pickle 内容。
 - 代码中针对 Ruff 规则（F401/BLE001/E722 等）已统一清理未使用依赖，并将异常捕获限定在预期类型；后续新增 try/except 块时请保持同等粒度。
 - 图像增强流程的 `_log_vision_prompt` 使用 `logger.debug` 输出前后文，默认不会污染 info 级日志，如需调试可上调日志级别。
 - 建议通过 `/health` 做存活探测，`/gpu/status` 监控排队，MinIO 接口应配合真实服务验证。

@@ -5,7 +5,7 @@
       "cwd": ".",
       "script": ".venv/bin/celery",
       "interpreter": ".venv/bin/python",
-      "args": "-A src.services.two_stage_pipeline flower --address=0.0.0.0 --port=5556",
+      "args": "-A src.services.two_stage_pipeline flower --address=0.0.0.0 --port=5555",
       "env": {
         "CELERY_BROKER_URL": "redis://localhost:6379/0",
         "CELERY_RESULT_BACKEND": "redis://localhost:6379/0",

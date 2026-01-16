@@ -13,14 +13,17 @@ Two-stage MinerU+vision Celery pipeline (解析队列 + 视觉队列 + 汇总).
   MINERU_TASK_STORAGE_DIR（默认 /tmp/tiangong_mineru_tasks）
 """
 
+import hashlib
 import os
 import shutil
 import uuid
+from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Union
 
 from celery import Celery, chord, chain
 from loguru import logger
+from PIL import Image
 
 from src.config.config import (
     CELERY_BROKER_URL,
@@ -43,6 +46,15 @@ from src.services.mineru_with_images_service import (
 )
 from src.services.vision_service import VisionModel, VisionProvider, vision_completion
 from src.utils.text_output import build_plain_text
+
+MIN_IMAGE_AREA_RATIO = 0.01
+MIN_IMAGE_AREA_RATIO_WITH_CAPTION = 0.005
+MAX_IMAGE_ASPECT_RATIO = 10.0
+MIN_IMAGE_BYTES = 10 * 1024
+MIN_IMAGE_BYTES_WITH_CAPTION = 2 * 1024
+MIN_IMAGE_MIN_DIM = 96
+MIN_IMAGE_PIXEL_AREA = MIN_IMAGE_MIN_DIM * MIN_IMAGE_MIN_DIM
+PER_PAGE_IMAGE_LIMIT = 5
 
 PARSE_QUEUE = os.getenv("CELERY_TASK_PARSE_QUEUE", CELERY_TASK_MINERU_QUEUE or "queue_parse_gpu")
 VISION_QUEUE = os.getenv("CELERY_TASK_VISION_QUEUE", "queue_vision")
@@ -88,6 +100,84 @@ def _build_image_jobs(content_list: List[Dict], output_dir: str) -> tuple[List[D
     idx_map = _reindex_blocks(context_blocks)
     image_jobs: List[Dict] = []
     seq = 1
+    per_page_counts: Dict[int, int] = defaultdict(int)
+    seen_hashes: set[str] = set()
+
+    def _extract_bbox(item: Dict) -> Optional[tuple[float, float, float, float]]:
+        bbox = item.get("bbox")
+        if not (isinstance(bbox, (list, tuple)) and len(bbox) == 4):
+            return None
+        try:
+            x0, y0, x1, y1 = (float(v) for v in bbox)
+        except Exception:
+            return None
+        return x0, y0, x1, y1
+
+    def _page_size(item: Dict) -> Optional[tuple[float, float]]:
+        page_size = item.get("page_size")
+        if isinstance(page_size, (list, tuple)) and len(page_size) == 2:
+            try:
+                w, h = (float(v) for v in page_size)
+                if w > 0 and h > 0:
+                    return w, h
+            except Exception:
+                pass
+        w = item.get("page_width") or item.get("page_w")
+        h = item.get("page_height") or item.get("page_h")
+        try:
+            if w and h and float(w) > 0 and float(h) > 0:
+                return float(w), float(h)
+        except Exception:
+            return None
+        return None
+
+    def _image_area_ratio(item: Dict) -> Optional[float]:
+        bbox = _extract_bbox(item)
+        page = _page_size(item)
+        if not bbox or not page:
+            return None
+        x0, y0, x1, y1 = bbox
+        pw, ph = page
+        area = max(x1 - x0, 0) * max(y1 - y0, 0)
+        page_area = pw * ph
+        if page_area <= 0:
+            return None
+        return area / page_area
+
+    def _aspect_ratio(item: Dict) -> Optional[float]:
+        bbox = _extract_bbox(item)
+        if not bbox:
+            return None
+        x0, y0, x1, y1 = bbox
+        width = max(x1 - x0, 0)
+        height = max(y1 - y0, 0)
+        if width <= 0 or height <= 0:
+            return None
+        ratio = width / height
+        return ratio if ratio >= 1 else 1 / ratio
+
+    def _image_dims(path: str) -> tuple[Optional[int], Optional[int]]:
+        try:
+            with Image.open(path) as im:
+                return im.width, im.height
+        except Exception:
+            return None, None
+
+    def _file_stats(path: str) -> tuple[int, Optional[str]]:
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            return 0, None
+        hash_value: Optional[str] = None
+        try:
+            with open(path, "rb") as fh:
+                digest = hashlib.md5()
+                for chunk in iter(lambda: fh.read(8192), b""):
+                    digest.update(chunk)
+                hash_value = digest.hexdigest()
+        except OSError:
+            hash_value = None
+        return size, hash_value
 
     for item in content_list:
         if item.get("type") != "image" or not (item.get("img_path") and item["img_path"].strip()):
@@ -96,6 +186,90 @@ def _build_image_jobs(content_list: List[Dict], output_dir: str) -> tuple[List[D
         img_path = os.path.join(output_dir, item["img_path"])
         if not os.path.exists(img_path):
             logger.info("Skipping missing image at %s", img_path)
+            continue
+
+        page_number = int(item.get("page_idx", 0)) + 1
+        has_caption = bool(item.get("img_caption") or item.get("img_footnote"))
+        area_ratio = _image_area_ratio(item)
+        aspect_ratio = _aspect_ratio(item)
+        dim_w, dim_h = _image_dims(img_path)
+        file_size, file_hash = _file_stats(img_path)
+
+        min_area_ratio = MIN_IMAGE_AREA_RATIO_WITH_CAPTION if has_caption else MIN_IMAGE_AREA_RATIO
+        if area_ratio is not None and area_ratio < min_area_ratio:
+            logger.debug(
+                "Skip image (small area %.4f < %.4f) at %s page %s",
+                area_ratio,
+                min_area_ratio,
+                img_path,
+                page_number,
+            )
+            continue
+
+        if aspect_ratio is not None and aspect_ratio > MAX_IMAGE_ASPECT_RATIO:
+            logger.debug(
+                "Skip image (extreme aspect %.2f > %.2f) at %s page %s",
+                aspect_ratio,
+                MAX_IMAGE_ASPECT_RATIO,
+                img_path,
+                page_number,
+            )
+            continue
+
+        if dim_w and dim_h:
+            dim_aspect = dim_w / dim_h if dim_w >= dim_h else dim_h / dim_w
+            if dim_aspect > MAX_IMAGE_ASPECT_RATIO:
+                logger.debug(
+                    "Skip image (extreme intrinsic aspect %.2f > %.2f) at %s page %s",
+                    dim_aspect,
+                    MAX_IMAGE_ASPECT_RATIO,
+                    img_path,
+                    page_number,
+                )
+                continue
+            if not has_caption:
+                min_side = min(dim_w, dim_h)
+                if min_side < MIN_IMAGE_MIN_DIM:
+                    logger.debug(
+                        "Skip image (min side %d < %d) at %s page %s",
+                        min_side,
+                        MIN_IMAGE_MIN_DIM,
+                        img_path,
+                        page_number,
+                    )
+                    continue
+                if dim_w * dim_h < MIN_IMAGE_PIXEL_AREA:
+                    logger.debug(
+                        "Skip image (pixel area %d < %d) at %s page %s",
+                        dim_w * dim_h,
+                        MIN_IMAGE_PIXEL_AREA,
+                        img_path,
+                        page_number,
+                    )
+                    continue
+
+        min_bytes = MIN_IMAGE_BYTES_WITH_CAPTION if has_caption else MIN_IMAGE_BYTES
+        if file_size and file_size < min_bytes and not has_caption:
+            logger.debug(
+                "Skip image (size %dB < %dB) at %s page %s",
+                file_size,
+                min_bytes,
+                img_path,
+                page_number,
+            )
+            continue
+
+        if file_hash and file_hash in seen_hashes:
+            logger.debug("Skip duplicate image hash %s at %s", file_hash, img_path)
+            continue
+
+        if per_page_counts[page_number] >= PER_PAGE_IMAGE_LIMIT:
+            logger.debug(
+                "Skip image due to per-page limit %d at page %s (%s)",
+                PER_PAGE_IMAGE_LIMIT,
+                page_number,
+                img_path,
+            )
             continue
 
         cur_idx = idx_map.get(id(item))
@@ -114,6 +288,9 @@ def _build_image_jobs(content_list: List[Dict], output_dir: str) -> tuple[List[D
             }
         )
         seq += 1
+        per_page_counts[page_number] += 1
+        if file_hash:
+            seen_hashes.add(file_hash)
 
     return image_jobs, content_list
 

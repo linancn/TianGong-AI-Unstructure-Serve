@@ -21,6 +21,7 @@ DEFAULT_INPUT_DIR = Path("pdfs")
 DEFAULT_OUTPUT_DIR = Path("pickle")
 DEFAULT_INTERVAL = float(os.environ.get("TWO_STAGE_POLL_INTERVAL", 3))
 DEFAULT_TIMEOUT = float(os.environ.get("TWO_STAGE_POLL_TIMEOUT", 800))
+MAX_ATTEMPTS = 3  # initial attempt + up to 2 retries
 
 VISION_PROVIDER = (os.environ.get("VISION_PROVIDER") or "").strip()
 VISION_MODEL = (os.environ.get("VISION_MODEL") or "").strip()
@@ -142,18 +143,20 @@ def main() -> None:
 
         tasks: Dict[str, Path] = {}
         start_times: Dict[str, float] = {}
+        attempts: Dict[Path, int] = {}
 
         for pdf_path in pdfs:
             task_id = submit_task(session, pdf_path, token)
             tasks[task_id] = pdf_path
             start_times[task_id] = time.time()
+            attempts[pdf_path] = 1
 
         if not tasks:
             logging.info("All PDFs already processed under %s", input_dir)
             return
 
-        successes: Dict[str, Path] = {}
-        failures: Dict[str, str] = {}
+        successes: Dict[Path, str] = {}
+        failures: Dict[Path, str] = {}
 
         while tasks:
             finished: Dict[str, Path] = {}
@@ -174,18 +177,46 @@ def main() -> None:
                         pickle.dump(result, f)
                     logging.info("Wrote %s", pickle_path)
                     finished[task_id] = pdf_path
-                    successes[task_id] = pdf_path
+                    successes[pdf_path] = task_id
                 except TimeoutError:
-                    logging.error("Task %s timed out after %.1fs", task_id, DEFAULT_TIMEOUT)
+                    error_msg = f"timeout after {DEFAULT_TIMEOUT:.1f}s"
+                    logging.error("Task %s timed out for %s (%s)", task_id, pdf_path, error_msg)
                     finished[task_id] = pdf_path
-                    failures[task_id] = "timeout"
+                    attempts[pdf_path] = attempts.get(pdf_path, 1)
+                    if attempts[pdf_path] < MAX_ATTEMPTS:
+                        attempts[pdf_path] += 1
+                        logging.info(
+                            "Retrying %s (attempt %d/%d)...",
+                            pdf_path,
+                            attempts[pdf_path],
+                            MAX_ATTEMPTS,
+                        )
+                        new_task = submit_task(session, pdf_path, token)
+                        tasks[new_task] = pdf_path
+                        start_times[new_task] = time.time()
+                    else:
+                        failures[pdf_path] = error_msg
                 except Exception as exc:
                     logging.error("Failed to process %s (task %s): %s", pdf_path, task_id, exc)
                     finished[task_id] = pdf_path
-                    failures[task_id] = str(exc)
+                    attempts[pdf_path] = attempts.get(pdf_path, 1)
+                    if attempts[pdf_path] < MAX_ATTEMPTS:
+                        attempts[pdf_path] += 1
+                        logging.info(
+                            "Retrying %s (attempt %d/%d)...",
+                            pdf_path,
+                            attempts[pdf_path],
+                            MAX_ATTEMPTS,
+                        )
+                        new_task = submit_task(session, pdf_path, token)
+                        tasks[new_task] = pdf_path
+                        start_times[new_task] = time.time()
+                    else:
+                        failures[pdf_path] = str(exc)
 
             for task_id in finished:
                 tasks.pop(task_id, None)
+                start_times.pop(task_id, None)
 
             if tasks:
                 time.sleep(DEFAULT_INTERVAL)
@@ -193,8 +224,10 @@ def main() -> None:
         logging.info(
             "Finished two-stage enqueue: %d successes, %d failures.", len(successes), len(failures)
         )
-        for task_id, err in failures.items():
-            logging.error("Task %s failed: %s", task_id, err)
+        for pdf_path, err in failures.items():
+            logging.error(
+                "Failed after %d attempts: %s (%s)", attempts.get(pdf_path, 0), pdf_path, err
+            )
     finally:
         session.close()
 

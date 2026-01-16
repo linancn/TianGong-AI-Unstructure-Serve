@@ -102,6 +102,15 @@ pm2 status
 
 pm2 delete all
 
+#清空队列
+uv run celery -A src.services.two_stage_pipeline purge -Q queue_parse_gpu,queue_vision,queue_dispatch,default
+# 清空redis
+redis-cli -n 0 flushdb
+# 删除暂存文件
+rm -rf /tmp/tiangong_mineru_tasks/*
+# 转成json
+python3 src/scripts/read_pickle.py "pickle/41-Life cycle assessment of lithium nickel cobalt manganese oxide batteries and lithium iron phosphate batteries for electric vehicles in China. JES 2022.pkl"
+
 # 使用 for 循环和 lsof
 for port in {8770..8773}
 do
