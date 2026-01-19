@@ -7,9 +7,13 @@ Two-stage MinerU+vision Celery pipeline (解析队列 + 视觉队列 + 汇总).
 
 环境变量：
   CELERY_TASK_PARSE_QUEUE（默认使用 CELERY_TASK_MINERU_QUEUE 或 queue_parse_gpu）
+  CELERY_TASK_PARSE_URGENT_QUEUE（默认 queue_parse_urgent）
   CELERY_TASK_VISION_QUEUE（默认 queue_vision）
+  CELERY_TASK_VISION_URGENT_QUEUE（默认 queue_vision_urgent）
   CELERY_TASK_DISPATCH_QUEUE（默认 CELERY_TASK_DEFAULT_QUEUE 或 default）
+  CELERY_TASK_DISPATCH_URGENT_QUEUE（默认 queue_dispatch_urgent）
   CELERY_TASK_MERGE_QUEUE（默认 CELERY_TASK_DEFAULT_QUEUE 或 default）
+  CELERY_TASK_MERGE_URGENT_QUEUE（默认 queue_merge_urgent）
   MINERU_TASK_STORAGE_DIR（默认 /tmp/tiangong_mineru_tasks）
 """
 
@@ -56,10 +60,40 @@ MIN_IMAGE_MIN_DIM = 96
 MIN_IMAGE_PIXEL_AREA = MIN_IMAGE_MIN_DIM * MIN_IMAGE_MIN_DIM
 PER_PAGE_IMAGE_LIMIT = 5
 
-PARSE_QUEUE = os.getenv("CELERY_TASK_PARSE_QUEUE", CELERY_TASK_MINERU_QUEUE or "queue_parse_gpu")
-VISION_QUEUE = os.getenv("CELERY_TASK_VISION_QUEUE", "queue_vision")
-DISPATCH_QUEUE = os.getenv("CELERY_TASK_DISPATCH_QUEUE", CELERY_TASK_DEFAULT_QUEUE or "default")
-MERGE_QUEUE = os.getenv("CELERY_TASK_MERGE_QUEUE", CELERY_TASK_DEFAULT_QUEUE or "default")
+
+def _queue_env(name: str, default: str) -> str:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    stripped = value.strip()
+    return stripped or default
+
+
+PARSE_QUEUE = _queue_env("CELERY_TASK_PARSE_QUEUE", CELERY_TASK_MINERU_QUEUE or "queue_parse_gpu")
+VISION_QUEUE = _queue_env("CELERY_TASK_VISION_QUEUE", "queue_vision")
+DISPATCH_QUEUE = _queue_env("CELERY_TASK_DISPATCH_QUEUE", CELERY_TASK_DEFAULT_QUEUE or "default")
+MERGE_QUEUE = _queue_env("CELERY_TASK_MERGE_QUEUE", CELERY_TASK_DEFAULT_QUEUE or "default")
+PARSE_URGENT_QUEUE = _queue_env("CELERY_TASK_PARSE_URGENT_QUEUE", "queue_parse_urgent")
+VISION_URGENT_QUEUE = _queue_env("CELERY_TASK_VISION_URGENT_QUEUE", "queue_vision_urgent")
+DISPATCH_URGENT_QUEUE = _queue_env("CELERY_TASK_DISPATCH_URGENT_QUEUE", "queue_dispatch_urgent")
+MERGE_URGENT_QUEUE = _queue_env("CELERY_TASK_MERGE_URGENT_QUEUE", "queue_merge_urgent")
+
+
+def resolve_two_stage_queues(priority: Optional[str]) -> Dict[str, str]:
+    if priority == "urgent":
+        return {
+            "parse": PARSE_URGENT_QUEUE,
+            "vision": VISION_URGENT_QUEUE,
+            "dispatch": DISPATCH_URGENT_QUEUE,
+            "merge": MERGE_URGENT_QUEUE,
+        }
+    return {
+        "parse": PARSE_QUEUE,
+        "vision": VISION_QUEUE,
+        "dispatch": DISPATCH_QUEUE,
+        "merge": MERGE_QUEUE,
+    }
+
 
 celery_app = Celery(
     "mineru_two_stage",
@@ -67,19 +101,22 @@ celery_app = Celery(
     backend=CELERY_RESULT_BACKEND,
 )
 
-celery_app.conf.update(
-    task_serializer="json",
-    result_serializer="json",
-    accept_content=["json"],
-    task_default_queue=CELERY_TASK_DEFAULT_QUEUE or "default",
-    task_track_started=True,
-    task_routes={
+celery_conf = {
+    "task_serializer": "json",
+    "result_serializer": "json",
+    "accept_content": ["json"],
+    "task_default_queue": CELERY_TASK_DEFAULT_QUEUE or "default",
+    "task_track_started": True,
+    "task_routes": {
         "two_stage.parse": {"queue": PARSE_QUEUE},
         "two_stage.vision": {"queue": VISION_QUEUE},
         "two_stage.merge": {"queue": MERGE_QUEUE},
         "two_stage.dispatch": {"queue": DISPATCH_QUEUE},
     },
-)
+}
+if CELERY_BROKER_URL.startswith(("redis://", "rediss://")):
+    celery_conf["broker_transport_options"] = {"queue_order_strategy": "priority"}
+celery_app.conf.update(**celery_conf)
 
 
 def _ensure_workspace(existing: Optional[str] = None) -> Path:
@@ -504,27 +541,31 @@ def merge_task(
     }
 
 
-@celery_app.task(name="two_stage.dispatch", acks_late=True)
+@celery_app.task(name="two_stage.dispatch", acks_late=True, bind=True)
 def dispatch(
+    self,
     parse_payload: Dict[str, object],
     provider: Optional[Union[VisionProvider, str]] = None,
     model: Optional[Union[VisionModel, str]] = None,
     prompt: Optional[str] = None,
+    vision_queue: Optional[str] = None,
+    merge_queue: Optional[str] = None,
 ) -> Dict[str, object]:  # type: ignore[override]
-    """Kick off vision fan-out + merge; blocks until merge completes."""
+    """Kick off vision fan-out + merge without blocking inside a task."""
     image_jobs: List[Dict[str, object]] = parse_payload.get("image_jobs") or []
     prompt_override = _normalize_prompt(prompt)
+    resolved_vision_queue = vision_queue or VISION_QUEUE
+    resolved_merge_queue = merge_queue or MERGE_QUEUE
     if not image_jobs:
-        return merge_task.apply_async(args=[[], parse_payload], queue=MERGE_QUEUE).get()
+        raise self.replace(merge_task.s([], parse_payload).set(queue=resolved_merge_queue))
 
     header = [
         vision_task.s(job, provider=provider, model=model, prompt=prompt_override).set(
-            queue=VISION_QUEUE
+            queue=resolved_vision_queue
         )
         for job in image_jobs
     ]
-    async_result = chord(header)(merge_task.s(parse_payload).set(queue=MERGE_QUEUE))
-    return async_result.get(disable_sync_subtasks=False)
+    raise self.replace(chord(header, merge_task.s(parse_payload).set(queue=resolved_merge_queue)))
 
 
 def submit_two_stage_job(
@@ -539,8 +580,16 @@ def submit_two_stage_job(
     workspace: Optional[str] = None,
     cleanup_source: bool = False,
     extra_cleanup: Optional[Sequence[str]] = None,
+    parse_queue: Optional[str] = None,
+    vision_queue: Optional[str] = None,
+    dispatch_queue: Optional[str] = None,
+    merge_queue: Optional[str] = None,
 ):
     """Enqueue two-stage workflow; returns AsyncResult for the final merge."""
+    resolved_parse_queue = parse_queue or PARSE_QUEUE
+    resolved_dispatch_queue = dispatch_queue or DISPATCH_QUEUE
+    resolved_vision_queue = vision_queue or VISION_QUEUE
+    resolved_merge_queue = merge_queue or MERGE_QUEUE
     payload = {
         "source_path": source_path,
         "backend": backend,
@@ -552,7 +601,13 @@ def submit_two_stage_job(
         "extra_cleanup": list(extra_cleanup or []),
     }
     workflow = chain(
-        parse_task.s(payload).set(queue=PARSE_QUEUE),
-        dispatch.s(provider=provider, model=model, prompt=prompt).set(queue=DISPATCH_QUEUE),
+        parse_task.s(payload).set(queue=resolved_parse_queue),
+        dispatch.s(
+            provider=provider,
+            model=model,
+            prompt=prompt,
+            vision_queue=resolved_vision_queue,
+            merge_queue=resolved_merge_queue,
+        ).set(queue=resolved_dispatch_queue),
     )
     return workflow.apply_async()

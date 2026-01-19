@@ -5,7 +5,7 @@
       "cwd": ".",
       "script": ".venv/bin/celery",
       "interpreter": ".venv/bin/python",
-      "args": "-A src.services.two_stage_pipeline worker -n parse@%h -l info -Q queue_parse_gpu -P solo --prefetch-multiplier=1",
+      "args": "-A src.services.two_stage_pipeline worker -n parse@%h -l info -Q queue_parse_urgent,queue_parse_gpu -P solo --prefetch-multiplier=1",
       "env": {
         "CELERY_BROKER_URL": "redis://localhost:6379/0",
         "CELERY_TASK_PARSE_QUEUE": "queue_parse_gpu"
@@ -16,7 +16,7 @@
       "cwd": ".",
       "script": ".venv/bin/celery",
       "interpreter": ".venv/bin/python",
-      "args": "-A src.services.two_stage_pipeline worker -n vision@%h -l info -Q queue_vision -P threads -c 32 --prefetch-multiplier=1",
+      "args": "-A src.services.two_stage_pipeline worker -n vision@%h -l info -Q queue_vision_urgent,queue_vision -P threads -c 32 --prefetch-multiplier=1",
       "env": {
         "CELERY_BROKER_URL": "redis://localhost:6379/0",
         "CELERY_TASK_VISION_QUEUE": "queue_vision"
@@ -27,7 +27,7 @@
       "cwd": ".",
       "script": ".venv/bin/celery",
       "interpreter": ".venv/bin/python",
-      "args": "-A src.services.two_stage_pipeline worker -n dispatch@%h -l info -Q queue_dispatch -P threads -c 4 --prefetch-multiplier=1",
+      "args": "-A src.services.two_stage_pipeline worker -n dispatch@%h -l info -Q queue_dispatch_urgent,queue_dispatch -P threads -c 4 --prefetch-multiplier=1",
       "env": {
         "CELERY_BROKER_URL": "redis://localhost:6379/0",
         "CELERY_TASK_DISPATCH_QUEUE": "queue_dispatch"
@@ -38,7 +38,7 @@
       "cwd": ".",
       "script": ".venv/bin/celery",
       "interpreter": ".venv/bin/python",
-      "args": "-A src.services.two_stage_pipeline worker -n merge@%h -l info -Q default -P threads -c 4 --prefetch-multiplier=1",
+      "args": "-A src.services.two_stage_pipeline worker -n merge@%h -l info -Q queue_merge_urgent,default -P threads -c 4 --prefetch-multiplier=1",
       "env": {
         "CELERY_BROKER_URL": "redis://localhost:6379/0",
         "CELERY_TASK_MERGE_QUEUE": "default"

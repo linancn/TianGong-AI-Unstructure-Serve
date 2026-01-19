@@ -3,6 +3,7 @@
 import os
 import shutil
 import uuid
+from enum import Enum
 from pathlib import Path
 from typing import Optional
 
@@ -12,7 +13,11 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from src.config.config import MINERU_TASK_STORAGE_DIR
 from src.models.models import ResponseWithPageNum, TextElementWithPageNum
-from src.services.two_stage_pipeline import celery_app, submit_two_stage_job
+from src.services.two_stage_pipeline import (
+    celery_app,
+    resolve_two_stage_queues,
+    submit_two_stage_job,
+)
 from src.services.vision_service import (
     AVAILABLE_MODEL_VALUES,
     AVAILABLE_PROVIDER_VALUES,
@@ -32,6 +37,11 @@ router = APIRouter()
 SUPPORTED_EXTENSIONS = mineru_supported_extensions()
 ACCEPTED_EXTENSIONS = SUPPORTED_EXTENSIONS | CONVERTIBLE_OFFICE_EXTENSIONS
 ACCEPTED_EXTENSIONS_STR = format_extension_list(ACCEPTED_EXTENSIONS)
+
+
+class TaskPriority(str, Enum):
+    NORMAL = "normal"
+    URGENT = "urgent"
 
 
 def _normalize_filename(filename: str, fallback_ext: str) -> str:
@@ -92,6 +102,12 @@ async def two_stage_task(
     file: UploadFile = File(...),
     chunk_type: bool = Form(False),
     return_txt: bool = Form(False),
+    priority: TaskPriority = Form(
+        TaskPriority.NORMAL,
+        description=(
+            'Queue priority: default as normal, "urgent" routes to urgent two-stage queues.'
+        ),
+    ),
     provider: Optional[VisionProvider] = Depends(_form_provider),
     model: Optional[VisionModel] = Depends(_form_model),
     prompt: Optional[str] = Form(None),
@@ -142,6 +158,7 @@ async def two_stage_task(
             shutil.rmtree(workspace, ignore_errors=True)
             raise HTTPException(status_code=500, detail=f"Office conversion failed: {exc}") from exc
 
+    queue_names = resolve_two_stage_queues(priority)
     try:
         async_result = submit_two_stage_job(
             processing_path,
@@ -154,6 +171,10 @@ async def two_stage_task(
             workspace=str(workspace),
             cleanup_source=False,
             extra_cleanup=list(extra_cleanup),
+            parse_queue=queue_names["parse"],
+            vision_queue=queue_names["vision"],
+            dispatch_queue=queue_names["dispatch"],
+            merge_queue=queue_names["merge"],
         )
     except Exception as exc:
         shutil.rmtree(workspace, ignore_errors=True)

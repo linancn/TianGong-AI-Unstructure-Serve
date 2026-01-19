@@ -44,6 +44,10 @@ def test_two_stage_enqueues_and_returns_task_id(client, monkeypatch, tmp_path):
         workspace=None,
         cleanup_source=False,
         extra_cleanup=None,
+        parse_queue=None,
+        vision_queue=None,
+        dispatch_queue=None,
+        merge_queue=None,
     ):
         captured.update(
             {
@@ -57,17 +61,32 @@ def test_two_stage_enqueues_and_returns_task_id(client, monkeypatch, tmp_path):
                 "workspace": workspace,
                 "cleanup_source": cleanup_source,
                 "extra_cleanup": extra_cleanup,
+                "parse_queue": parse_queue,
+                "vision_queue": vision_queue,
+                "dispatch_queue": dispatch_queue,
+                "merge_queue": merge_queue,
             }
         )
         return DummyAsyncResult()
 
     monkeypatch.setattr(two_stage_router, "submit_two_stage_job", fake_submit_two_stage_job)
+    monkeypatch.setattr(
+        two_stage_router,
+        "resolve_two_stage_queues",
+        lambda priority: {
+            "parse": "queue_parse_urgent",
+            "vision": "queue_vision_urgent",
+            "dispatch": "queue_dispatch_urgent",
+            "merge": "queue_merge_urgent",
+        },
+    )
 
     resp = client.post(
         "/two_stage/task",
         data={
             "chunk_type": "true",
             "return_txt": "true",
+            "priority": "urgent",
             "provider": VisionProvider.OPENAI.value,
             "model": VisionModel.OPENAI_GPT_5_MINI.value,
             "prompt": "describe",
@@ -84,3 +103,7 @@ def test_two_stage_enqueues_and_returns_task_id(client, monkeypatch, tmp_path):
     assert captured["provider"] == VisionProvider.OPENAI
     assert captured["model"] == VisionModel.OPENAI_GPT_5_MINI
     assert captured["prompt"] == "describe"
+    assert captured["parse_queue"] == "queue_parse_urgent"
+    assert captured["vision_queue"] == "queue_vision_urgent"
+    assert captured["dispatch_queue"] == "queue_dispatch_urgent"
+    assert captured["merge_queue"] == "queue_merge_urgent"

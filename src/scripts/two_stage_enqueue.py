@@ -22,10 +22,12 @@ DEFAULT_OUTPUT_DIR = Path("pickle")
 DEFAULT_INTERVAL = float(os.environ.get("TWO_STAGE_POLL_INTERVAL", 3))
 DEFAULT_TIMEOUT = float(os.environ.get("TWO_STAGE_POLL_TIMEOUT", 800))
 MAX_ATTEMPTS = 3  # initial attempt + up to 2 retries
+BATCH_SIZE = 5000
 
 VISION_PROVIDER = (os.environ.get("VISION_PROVIDER") or "").strip()
 VISION_MODEL = (os.environ.get("VISION_MODEL") or "").strip()
 VISION_PROMPT = (os.environ.get("VISION_PROMPT") or "").strip()
+PRIORITY = (os.environ.get("TWO_STAGE_PRIORITY") or "normal").strip().lower() or "normal"
 
 
 def _bool_env(name: str, default: bool = False) -> bool:
@@ -49,6 +51,7 @@ logging.basicConfig(
 
 def _build_form_data() -> Dict[str, str]:
     form: Dict[str, str] = {}
+    form["priority"] = PRIORITY
     if VISION_PROVIDER:
         form["provider"] = VISION_PROVIDER
     if VISION_MODEL:
@@ -66,8 +69,9 @@ def submit_task(session: requests.Session, pdf_path: Path, token: str) -> str:
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     form_data = _build_form_data()
     logging.info(
-        "Submitting %s with provider=%s model=%s",
+        "Submitting %s with priority=%s provider=%s model=%s",
         pdf_path,
+        form_data.get("priority", "<default>"),
         form_data.get("provider", "<default>"),
         form_data.get("model", "<default>"),
     )
@@ -88,31 +92,19 @@ def submit_task(session: requests.Session, pdf_path: Path, token: str) -> str:
     return task_id
 
 
-def fetch(
+def fetch_status(
     session: requests.Session,
     task_id: str,
     token: str,
-    interval: float = DEFAULT_INTERVAL,
-    timeout: float = DEFAULT_TIMEOUT,
-):
+) -> Dict:
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    start = time.time()
-    while True:
-        resp = session.get(
-            f"{API_BASE}/two_stage/task/{task_id}",
-            headers=headers,
-            timeout=30000,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        state = data["state"]
-        if state == "SUCCESS":
-            return data.get("result") or data.get("Result")
-        if state in {"FAILURE", "REVOKED"}:
-            raise RuntimeError(f"Task failed: {data.get('error')}")
-        if time.time() - start > timeout:
-            raise TimeoutError(f"Task {task_id} timeout")
-        time.sleep(interval)
+    resp = session.get(
+        f"{API_BASE}/two_stage/task/{task_id}",
+        headers=headers,
+        timeout=30000,
+    )
+    resp.raise_for_status()
+    return resp.json()
 
 
 def iter_pdfs(input_dir: Path) -> Iterable[Path]:
@@ -128,8 +120,16 @@ def main() -> None:
     if not token:
         raise RuntimeError("FASTAPI_BEARER_TOKEN not found in environment")
 
-    input_dir = Path(os.environ.get("ESG_INPUT_DIR", DEFAULT_INPUT_DIR))
-    output_dir = Path(os.environ.get("ESG_OUTPUT_DIR", DEFAULT_OUTPUT_DIR))
+    input_dir = Path(
+        os.environ.get("TWO_STAGE_INPUT_DIR")
+        or os.environ.get("ESG_INPUT_DIR")
+        or DEFAULT_INPUT_DIR
+    )
+    output_dir = Path(
+        os.environ.get("TWO_STAGE_OUTPUT_DIR")
+        or os.environ.get("ESG_OUTPUT_DIR")
+        or DEFAULT_OUTPUT_DIR
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
 
     session = requests.Session()
@@ -141,85 +141,94 @@ def main() -> None:
             logging.info("No PDFs found under %s", input_dir)
             return
 
-        tasks: Dict[str, Path] = {}
-        start_times: Dict[str, float] = {}
         attempts: Dict[Path, int] = {}
-
-        for pdf_path in pdfs:
-            task_id = submit_task(session, pdf_path, token)
-            tasks[task_id] = pdf_path
-            start_times[task_id] = time.time()
-            attempts[pdf_path] = 1
-
-        if not tasks:
-            logging.info("All PDFs already processed under %s", input_dir)
-            return
 
         successes: Dict[Path, str] = {}
         failures: Dict[Path, str] = {}
 
-        while tasks:
-            finished: Dict[str, Path] = {}
-            for task_id, pdf_path in list(tasks.items()):
-                try:
-                    remaining = DEFAULT_TIMEOUT - (time.time() - start_times[task_id])
-                    if remaining <= 0:
-                        raise TimeoutError(f"Task {task_id} timeout")
-                    result = fetch(
-                        session,
-                        task_id,
-                        token,
-                        interval=DEFAULT_INTERVAL,
-                        timeout=remaining,
-                    )
-                    pickle_path = output_dir / f"{pdf_path.stem}.pkl"
-                    with pickle_path.open("wb") as f:
-                        pickle.dump(result, f)
-                    logging.info("Wrote %s", pickle_path)
-                    finished[task_id] = pdf_path
-                    successes[pdf_path] = task_id
-                except TimeoutError:
-                    error_msg = f"timeout after {DEFAULT_TIMEOUT:.1f}s"
-                    logging.error("Task %s timed out for %s (%s)", task_id, pdf_path, error_msg)
-                    finished[task_id] = pdf_path
-                    attempts[pdf_path] = attempts.get(pdf_path, 1)
-                    if attempts[pdf_path] < MAX_ATTEMPTS:
-                        attempts[pdf_path] += 1
-                        logging.info(
-                            "Retrying %s (attempt %d/%d)...",
-                            pdf_path,
-                            attempts[pdf_path],
-                            MAX_ATTEMPTS,
-                        )
-                        new_task = submit_task(session, pdf_path, token)
-                        tasks[new_task] = pdf_path
-                        start_times[new_task] = time.time()
-                    else:
-                        failures[pdf_path] = error_msg
-                except Exception as exc:
-                    logging.error("Failed to process %s (task %s): %s", pdf_path, task_id, exc)
-                    finished[task_id] = pdf_path
-                    attempts[pdf_path] = attempts.get(pdf_path, 1)
-                    if attempts[pdf_path] < MAX_ATTEMPTS:
-                        attempts[pdf_path] += 1
-                        logging.info(
-                            "Retrying %s (attempt %d/%d)...",
-                            pdf_path,
-                            attempts[pdf_path],
-                            MAX_ATTEMPTS,
-                        )
-                        new_task = submit_task(session, pdf_path, token)
-                        tasks[new_task] = pdf_path
-                        start_times[new_task] = time.time()
-                    else:
-                        failures[pdf_path] = str(exc)
+        for batch_start in range(0, len(pdfs), BATCH_SIZE):
+            batch = pdfs[batch_start : batch_start + BATCH_SIZE]
+            tasks: Dict[str, Path] = {}
+            run_start_times: Dict[str, float] = {}
 
-            for task_id in finished:
-                tasks.pop(task_id, None)
-                start_times.pop(task_id, None)
+            for pdf_path in batch:
+                task_id = submit_task(session, pdf_path, token)
+                tasks[task_id] = pdf_path
+                attempts[pdf_path] = 1
 
-            if tasks:
-                time.sleep(DEFAULT_INTERVAL)
+            if not tasks:
+                logging.info("All PDFs already processed under %s", input_dir)
+                return
+
+            while tasks:
+                finished: Dict[str, Path] = {}
+                for task_id, pdf_path in list(tasks.items()):
+                    try:
+                        data = fetch_status(session, task_id, token)
+                        state = data.get("state")
+                        if not state:
+                            raise RuntimeError(f"Task {task_id} response missing state: {data}")
+                        if state == "SUCCESS":
+                            result = data.get("result") or data.get("Result")
+                            if result is None:
+                                raise RuntimeError(f"Task {task_id} succeeded without result")
+                        elif state in {"FAILURE", "REVOKED"}:
+                            raise RuntimeError(f"Task failed: {data.get('error')}")
+                        else:
+                            if state == "STARTED" and task_id not in run_start_times:
+                                run_start_times[task_id] = time.time()
+                            started_at = run_start_times.get(task_id)
+                            if started_at is not None:
+                                elapsed = time.time() - started_at
+                                if elapsed >= DEFAULT_TIMEOUT:
+                                    raise TimeoutError(f"Task {task_id} timeout")
+                            continue
+                        pickle_path = output_dir / f"{pdf_path.stem}.pkl"
+                        with pickle_path.open("wb") as f:
+                            pickle.dump(result, f)
+                        logging.info("Wrote %s", pickle_path)
+                        finished[task_id] = pdf_path
+                        successes[pdf_path] = task_id
+                    except TimeoutError:
+                        error_msg = f"timeout after {DEFAULT_TIMEOUT:.1f}s"
+                        logging.error("Task %s timed out for %s (%s)", task_id, pdf_path, error_msg)
+                        finished[task_id] = pdf_path
+                        attempts[pdf_path] = attempts.get(pdf_path, 1)
+                        if attempts[pdf_path] < MAX_ATTEMPTS:
+                            attempts[pdf_path] += 1
+                            logging.info(
+                                "Retrying %s (attempt %d/%d)...",
+                                pdf_path,
+                                attempts[pdf_path],
+                                MAX_ATTEMPTS,
+                            )
+                            new_task = submit_task(session, pdf_path, token)
+                            tasks[new_task] = pdf_path
+                        else:
+                            failures[pdf_path] = error_msg
+                    except Exception as exc:
+                        logging.error("Failed to process %s (task %s): %s", pdf_path, task_id, exc)
+                        finished[task_id] = pdf_path
+                        attempts[pdf_path] = attempts.get(pdf_path, 1)
+                        if attempts[pdf_path] < MAX_ATTEMPTS:
+                            attempts[pdf_path] += 1
+                            logging.info(
+                                "Retrying %s (attempt %d/%d)...",
+                                pdf_path,
+                                attempts[pdf_path],
+                                MAX_ATTEMPTS,
+                            )
+                            new_task = submit_task(session, pdf_path, token)
+                            tasks[new_task] = pdf_path
+                        else:
+                            failures[pdf_path] = str(exc)
+
+                for task_id in finished:
+                    tasks.pop(task_id, None)
+                    run_start_times.pop(task_id, None)
+
+                if tasks:
+                    time.sleep(DEFAULT_INTERVAL)
 
         logging.info(
             "Finished two-stage enqueue: %d successes, %d failures.", len(successes), len(failures)
