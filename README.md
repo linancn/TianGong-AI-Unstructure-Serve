@@ -83,11 +83,32 @@ nohup env MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=2 uvicorn src.main
 npm i -g pm2
 watch -n 1 nvidia-smi
 
+# 启动所有服务
 pm2 start ecosystem.vllm.config.json
 pm2 start ecosystem.config.json
-pm2 start ecosystem.celery.json
-pm2 start ecosystem.two_stage.celery.json  # includes separate dispatch + merge workers; dispatch 不再订阅 default，避免阻塞 merge。
-pm2 start ecosystem.celery.flower.json
+pm2 start ecosystem.celery.json # 普通一队列
+pm2 start ecosystem.two_stage.celery.json # 两队列
+
+pm2 start ecosystem.two_stage.flower.json  # includes separate dispatch + merge workers; dispatch 不再订阅 default，避免阻塞 merge。用不上！
+pm2 start ecosystem.celery.flower.json # 用这个开启flower监控
+
+pm2 stop ecosystem.two_stage.celery.json # 停掉 two_stage celery
+pm2 delete ecosystem.two_stage.celery.json
+
+
+pm2 stop ecosystem.celery.flower.json # 停掉 flower
+pm2 delete ecosystem.celery.flower.json
+
+pm2 stop ecosystem.config.json # 停掉 unstructured-gunicorn
+pm2 delete ecosystem.config.json
+
+pm2 list # 查看状态
+
+# 清理/清空队列（选择对应 broker）
+# purge via celery (会连到 CELERY_BROKER_URL)
+celery -A src.services.celery_app purge -f
+
+
 
 pm2 start ecosystem.vllm.quatro.json
 pm2 start ecosystem.quatro.json
@@ -170,7 +191,7 @@ MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=0 mineru-vllm-server --port 
 
 # Redis Server
 ```bash
-docker run -d --name redis -p 6379:6379 redis:8
+docker run -d --name redis -p 6379:6379 redis:8 
 ```
 
 # Celery Worker
@@ -188,3 +209,6 @@ uv run celery -A src.services.celery_app worker \
 ```bash
 uv run celery -A src.services.celery_app flower --address=0.0.0.0 --port=5555
 ```
+
+# redis自启动
+docker run -d --name redis --restart=always -p 6379:6379 redis:8
