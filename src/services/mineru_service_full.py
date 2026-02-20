@@ -23,7 +23,6 @@ from mineru.backend.pipeline.model_json_to_middle_json import (
 )
 from mineru.backend.vlm.vlm_middle_json_mkcontent import union_make as vlm_union_make
 
-
 DEFAULT_VLLM_SERVER_URL = "http://127.0.0.1:30000"
 _SERVER_URL_ENV_KEYS: tuple[str, ...] = (
     "MINERU_VLLM_SERVER_URLS",

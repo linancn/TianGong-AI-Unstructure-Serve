@@ -8,7 +8,7 @@ from loguru import logger
 
 from src.models.models import ResponseWithPageNum, TextElementWithPageNum
 from src.services.mineru_service_full import parse_doc
-from src.utils.text_output import build_plain_text
+from src.utils.text_output import build_plain_text, sanitize_vision_text
 from src.services.vision_service import (
     VisionModel,
     VisionProvider,
@@ -356,7 +356,6 @@ def parse_with_images(
                     seq = job["seq"]
                     page_number = job["page_number"]
                     base_text = job["base_text"]
-                    is_title = job["is_title"]
 
                     logger.info(f"Image path: {job['img_path']}")
                     logger.info(
@@ -364,30 +363,30 @@ def parse_with_images(
                         f"(batch size {VISION_BATCH_SIZE})..."
                     )
                     try:
-                        vision_result = clean_text(future.result())
+                        vision_result = sanitize_vision_text(clean_text(future.result()))
                         logger.info(f"✓ Vision analysis complete for image {seq}/{total_images}")
 
                         vision_summary = vision_result.strip()
                         if base_text and vision_summary:
-                            combined_text = f"{base_text}\nImage Description: {vision_result}"
+                            combined_text = f"{base_text}\n{vision_result}"
                         elif base_text:
                             combined_text = base_text
                         elif vision_summary:
-                            combined_text = f"Image Description: {vision_result}"
+                            combined_text = vision_result
                         else:
                             combined_text = ""
 
                         if combined_text:
                             chunk = {"text": combined_text, "page_number": page_number}
-                            if chunk_type and is_title:
-                                chunk["type"] = "title"
+                            if chunk_type:
+                                chunk["type"] = "image"
                             image_results[id(job["item"])] = chunk
                     except Exception as exc:  # noqa: BLE001 - vision call can fail
                         logger.info(f"Error processing image {seq}/{total_images}: {str(exc)}")
                         if base_text.strip():
                             chunk = {"text": base_text, "page_number": page_number}
-                            if chunk_type and is_title:
-                                chunk["type"] = "title"
+                            if chunk_type:
+                                chunk["type"] = "image"
                             image_results[id(job["item"])] = chunk
 
             image_count += len(batch)
@@ -443,8 +442,8 @@ def parse_with_images(
                 img_txt = image_text(item)
                 if img_txt.strip():
                     chunk = {"text": img_txt, "page_number": page_number}
-                    if chunk_type and is_title:
-                        chunk["type"] = "title"
+                    if chunk_type:
+                        chunk["type"] = "image"
                     result_items.append(chunk)
 
         txt_text = build_plain_text(result_items) if return_txt else None

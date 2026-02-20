@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import re
 from typing import Iterable, Mapping, Optional
+
+_PAGE_MARKER_RE = re.compile(r"\[Page\s+\d+\]", re.IGNORECASE)
+_CHUNK_MARKER_RE = re.compile(r"\[ChunkType=[^\]]+\]", re.IGNORECASE)
+_IMAGE_PREFIX_RE = re.compile(r"^\s*Image Description:\s*", re.IGNORECASE)
 
 
 def _extract_text_and_type(item) -> tuple[str, Optional[str]]:
@@ -40,4 +45,15 @@ def build_plain_text(chunks: Iterable[object]) -> str:
     return "".join(parts).rstrip("\n")
 
 
-__all__ = ["build_plain_text"]
+def sanitize_vision_text(text: str) -> str:
+    """Remove internal context markers and helper prefixes from vision outputs."""
+    if not text:
+        return ""
+    cleaned = _IMAGE_PREFIX_RE.sub("", text.strip())
+    cleaned = _PAGE_MARKER_RE.sub("", cleaned)
+    cleaned = _CHUNK_MARKER_RE.sub("", cleaned)
+    lines = [line.strip() for line in cleaned.splitlines()]
+    return "\n".join(lines).strip()
+
+
+__all__ = ["build_plain_text", "sanitize_vision_text"]

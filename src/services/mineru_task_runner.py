@@ -24,7 +24,6 @@ from src.utils.mineru_backend import resolve_backend_from_env
 from src.utils.mineru_support import mineru_supported_extensions
 from src.utils.text_output import build_plain_text
 
-
 SUPPORTED_EXTENSIONS = mineru_supported_extensions()
 ACCEPTED_EXTENSIONS = SUPPORTED_EXTENSIONS | CONVERTIBLE_OFFICE_EXTENSIONS | MARKDOWN_EXTENSIONS
 

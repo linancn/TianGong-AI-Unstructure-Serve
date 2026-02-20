@@ -19,8 +19,8 @@
   - 支持 PDF、Office、Markdown 等格式，利用 `maybe_convert_to_pdf` 先行格式统一，再调用 GPU 调度器执行 MinerU 管线。  
   - 可选通过 `return_txt` 返回纯文本串（标题段落追加 `\n\n`、普通段落 `\n`）及内容类型标签，结果统一映射到 `TextElementWithPageNum` 模型。
   - MinerU 后端由环境变量 `MINERU_DEFAULT_BACKEND` 控制；允许值：`pipeline`/`vlm-transformers`/`vlm-vllm-engine`/`vlm-lmdeploy-engine`/`vlm-http-client`/`vlm-mlx-engine`，接受 `hybrid-auto-engine`/`hybrid-http-client`（当前 MinerU 2.7.0 wheel 未包含 hybrid 实现，内部回退至 `vlm-vllm-engine`/`vlm-http-client`）。API 不再接受表单参数覆盖后端。校验与规范化逻辑见 `src/utils/mineru_backend.py`。  
-  - 当调用端传入 `chunk_type=true` 时，解析结果除了保留标题（`type="title"`）外，还会额外返回页眉与页脚片段（`type="header"`/`"footer"`），并将页眉放在结果列表顶部；`page_number` 类型仍被忽略，且 `return_txt=true` 时的纯文本输出会按同样顺序拼接。
-  - `/mineru` 与 `/mineru_with_images` 均支持 `save_to_minio` 与 `minio_*` 表单字段，成功时会在 `mineru/<文件名>`（可自定义 `minio_prefix`）下写入源 PDF、解析 JSON 与逐页 JPEG，并通过响应体的 `minio_assets` 摘要返回上传结果；当 `chunk_type=true` 时，写入 MinIO 的 `parsed.json` 会保留 `type` 字段（header/footer/title）以便下游消费。两者唯一差异是 `/mineru_with_images` 会额外调用视觉大模型（`pipeline="images"`）为图像生成描述。
+  - 当调用端传入 `chunk_type=true` 时，解析结果除了保留标题（`type="title"`）外，还会额外返回页眉与页脚片段（`type="header"`/`"footer"`），图像识别块标记为 `type="image"`，并将页眉放在结果列表顶部；`page_number` 类型仍被忽略，且 `return_txt=true` 时的纯文本输出会按同样顺序拼接。
+  - `/mineru` 与 `/mineru_with_images` 均支持 `save_to_minio` 与 `minio_*` 表单字段，成功时会在 `mineru/<文件名>`（可自定义 `minio_prefix`）下写入源 PDF、解析 JSON 与逐页 JPEG，并通过响应体的 `minio_assets` 摘要返回上传结果；当 `chunk_type=true` 时，写入 MinIO 的 `parsed.json` 会保留 `type` 字段（header/footer/title/image）以便下游消费。两者唯一差异是 `/mineru_with_images` 会额外调用视觉大模型（`pipeline="images"`）为图像生成描述。
   - 额外可选字段 `minio_meta` 会在 `save_to_minio=true` 时把传入字符串写入 `meta.txt`（与 `source.pdf` 同目录），返回的 `minio_assets.meta_object` 会指向该文件，便于下游查阅附加元信息；若 `save_to_minio=false`，后端会安全地忽略该字段，避免调用端因默认值冲突而报错。
   - `mineru_minio_utils.build_minio_prefix()` 支持保留 Unicode/中文字符及常见中文标点，但所有空格（含全角空格）都会被统一替换为 `_`，其余不可打印字符也会折叠为 `_` 并清理多余分隔符。对应校验见 `tests/test_mineru_minio_utils.py`。
 - **MinerU 异步队列**（`src/routers/mineru_task_router.py`/`mineru_with_images_task_router.py` + `src/services/tasks/mineru_tasks.py`）  
@@ -54,7 +54,7 @@
   - `queue_*_urgent` 队列名可通过 `CELERY_TASK_*_URGENT_QUEUE` 覆盖，确保与 worker 的 `-Q` 参数一致。  
   - 该示例用于解耦 MinerU 解析与视觉阶段，避免 GPU 和视觉卡互相空转；已通过 `main.py` 暴露路由，可直接在现有服务中访问 `/two_stage/*`，也可按需用独立入口部署。
   - 两段式解析中如 MinerU 抛异常或未返回内容，`parse_doc` 会直接抛出 `RuntimeError`（包含 “do_parse returned None” 等提示），并将异常继续冒泡，`two_stage.parse` 会捕获并带上源文件路径返回给 Flower，避免再出现 “cannot unpack non-iterable NoneType object” 之类的报错。视觉阶段与 `/mineru_with_images` 对齐：`provider`/`model`/`prompt`（空字符串会清空为 None）会透传给 `vision_completion`，可通过请求参数或 `VISION_PROVIDER`/`VISION_MODEL` 环境变量指定模型；路由层使用 `VisionProvider`/`VisionModel` 进行校验，Swagger 会给出枚举提示。  
-  - 视觉合并规则：若原图有 caption/footnote 则合并为 `<原文本>\nImage Description: <视觉输出>`；无原始文本时直接用视觉输出，默认不带 `type`，`chunk_type=true` 仅为标题/页眉/页脚打标。视觉调用前会过滤图片：面积占比过小（默认 <1%，有 caption 放宽到 0.5%）、极端长宽比（>10:1）、无 caption 且体积过小（默认 <10KB）、固有分辨率过小（最短边 <96px 或像素面积过小）直接跳过；同页超过 5 张也会限流，并按文件哈希去重，减少 logo/边框等噪声送入视觉模型。  
+  - 视觉合并规则：若原图有 caption/footnote 则合并为 `<原文本>\n<视觉输出>`（不再添加 “Image Description:” 前缀）；无原始文本时直接用视觉输出，`chunk_type=true` 时图片块标记为 `type="image"`，标题/页眉/页脚仍按原规则打标，视觉输出会清理 `[Page N]`/`[ChunkType=...]` 标记以保证纯文本干净。视觉调用前会过滤图片：面积占比过小（默认 <1%，有 caption 放宽到 0.5%）、极端长宽比（>10:1）、无 caption 且体积过小（默认 <10KB）、固有分辨率过小（最短边 <96px 或像素面积过小）直接跳过；同页超过 5 张也会限流，并按文件哈希去重，减少 logo/边框等噪声送入视觉模型。  
 - PM2 模板：`ecosystem.two_stage.celery.json`（parse/vision/dispatch/merge worker 监听 urgent+normal 队列，按 `-Q` 顺序优先消费：`queue_parse_urgent,queue_parse_gpu`；`queue_vision_urgent,queue_vision`；`queue_dispatch_urgent,queue_dispatch`；`queue_merge_urgent,default`）；`ecosystem.two_stage.flower.json`（两段式 Flower，默认 5556 端口，继承两段式队列环境）。
 
 ## 配置与敏感信息

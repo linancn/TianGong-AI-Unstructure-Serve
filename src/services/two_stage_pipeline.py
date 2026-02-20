@@ -49,7 +49,7 @@ from src.services.mineru_with_images_service import (
     table_text,
 )
 from src.services.vision_service import VisionModel, VisionProvider, vision_completion
-from src.utils.text_output import build_plain_text
+from src.utils.text_output import build_plain_text, sanitize_vision_text
 
 MIN_IMAGE_AREA_RATIO = 0.01
 MIN_IMAGE_AREA_RATIO_WITH_CAPTION = 0.005
@@ -351,7 +351,7 @@ def _merge_content(
             base_text = image_text(item)
             vision_text = vision_map.get(seq, "")
             if base_text and vision_text:
-                combined_text = f"{base_text}\nImage Description: {vision_text}"
+                combined_text = f"{base_text}\n{vision_text}"
             elif base_text:
                 combined_text = base_text
             else:
@@ -359,8 +359,8 @@ def _merge_content(
 
             if combined_text.strip():
                 chunk = {"text": clean_text(combined_text), "page_number": page_number}
-                if chunk_type and is_title:
-                    chunk["type"] = "title"
+                if chunk_type:
+                    chunk["type"] = "image"
                 result_items.append(chunk)
         elif item.get("type") in ("header", "footer"):
             if not chunk_type:
@@ -397,8 +397,8 @@ def _merge_content(
             img_txt = image_text(item)
             if img_txt.strip():
                 chunk = {"text": img_txt, "page_number": page_number}
-                if chunk_type and is_title:
-                    chunk["type"] = "title"
+                if chunk_type:
+                    chunk["type"] = "image"
                 result_items.append(chunk)
 
     if chunk_type:
@@ -495,12 +495,16 @@ def vision_task(
     seq = job.get("seq")
     prompt_override = _normalize_prompt(prompt)
     try:
-        vision_text = vision_completion(
-            job["img_path"],
-            job.get("context_payload", "") or "",
-            prompt=prompt_override,
-            provider=provider,
-            model=model,
+        vision_text = sanitize_vision_text(
+            clean_text(
+                vision_completion(
+                    job["img_path"],
+                    job.get("context_payload", "") or "",
+                    prompt=prompt_override,
+                    provider=provider,
+                    model=model,
+                )
+            )
         )
         return {"seq": seq, "vision_text": vision_text}
     except Exception as exc:  # noqa: BLE001 - external call may fail
