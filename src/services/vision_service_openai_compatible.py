@@ -65,6 +65,7 @@ def vision_completion_openai_compatible(
     default_model: str,
     client_pool: OpenAICompatibleClientPool,
     extra_body: Optional[Dict[str, Any]] = None,
+    request_options: Optional[Dict[str, Any]] = None,
 ) -> str:
     base64_image = encode_image(image_path)
     prompt_text = build_vision_prompt(context, prompt)
@@ -87,6 +88,8 @@ def vision_completion_openai_compatible(
     }
     if extra_body:
         request_payload["extra_body"] = extra_body
+    if request_options:
+        request_payload.update(request_options)
 
     response = client.chat.completions.create(
         **request_payload,

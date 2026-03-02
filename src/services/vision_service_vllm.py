@@ -1,6 +1,8 @@
 import os
 from typing import Any, Dict, List, Optional
 
+from loguru import logger
+
 from src.config.config import VLLM_API_KEY, VLLM_BASE_URL, VLLM_BASE_URLS
 from src.services.vision_service_openai_compatible import (
     OpenAICompatibleClientPool,
@@ -10,6 +12,19 @@ from src.services.vision_service_openai_compatible import (
 DEFAULT_VISION_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct-FP8"
 _FALLBACK_API_KEY = "not-required"
 _ENABLE_THINKING_ENV = "VLLM_ENABLE_THINKING"
+_TEMPERATURE_ENV = "VLLM_VISION_TEMPERATURE"
+_TOP_P_ENV = "VLLM_VISION_TOP_P"
+_TOP_K_ENV = "VLLM_VISION_TOP_K"
+_MIN_P_ENV = "VLLM_VISION_MIN_P"
+_PRESENCE_PENALTY_ENV = "VLLM_VISION_PRESENCE_PENALTY"
+_REPETITION_PENALTY_ENV = "VLLM_VISION_REPETITION_PENALTY"
+
+_DEFAULT_TEMPERATURE = 1.0
+_DEFAULT_TOP_P = 1.0
+_DEFAULT_TOP_K = 40
+_DEFAULT_MIN_P = 0.0
+_DEFAULT_PRESENCE_PENALTY = 2.0
+_DEFAULT_REPETITION_PENALTY = 1.0
 
 
 def _resolve_api_key() -> str:
@@ -59,8 +74,62 @@ def _env_enable_thinking() -> bool:
     return raw_value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _build_extra_body() -> Dict[str, Dict[str, Any]]:
-    return {"chat_template_kwargs": {"enable_thinking": _env_enable_thinking()}}
+def _env_float(var_name: str, default: float) -> float:
+    raw_value = os.getenv(var_name)
+    if raw_value is None:
+        return default
+    try:
+        return float(raw_value.strip())
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid %s=%s, falling back to default %s.",
+            var_name,
+            raw_value,
+            default,
+        )
+        return default
+
+
+def _env_positive_int(var_name: str, default: int) -> int:
+    raw_value = os.getenv(var_name)
+    if raw_value is None:
+        return default
+    try:
+        parsed = int(raw_value.strip())
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid %s=%s, falling back to default %s.",
+            var_name,
+            raw_value,
+            default,
+        )
+        return default
+    if parsed <= 0:
+        logger.warning(
+            "Invalid %s=%s, falling back to default %s.",
+            var_name,
+            raw_value,
+            default,
+        )
+        return default
+    return parsed
+
+
+def _build_request_options() -> Dict[str, float]:
+    return {
+        "temperature": _env_float(_TEMPERATURE_ENV, _DEFAULT_TEMPERATURE),
+        "top_p": _env_float(_TOP_P_ENV, _DEFAULT_TOP_P),
+        "presence_penalty": _env_float(_PRESENCE_PENALTY_ENV, _DEFAULT_PRESENCE_PENALTY),
+    }
+
+
+def _build_extra_body() -> Dict[str, Any]:
+    return {
+        "top_k": _env_positive_int(_TOP_K_ENV, _DEFAULT_TOP_K),
+        "min_p": _env_float(_MIN_P_ENV, _DEFAULT_MIN_P),
+        "repetition_penalty": _env_float(_REPETITION_PENALTY_ENV, _DEFAULT_REPETITION_PENALTY),
+        "chat_template_kwargs": {"enable_thinking": _env_enable_thinking()},
+    }
 
 
 _CLIENT_POOL = OpenAICompatibleClientPool(
@@ -89,4 +158,5 @@ def vision_completion_vllm(
         default_model=DEFAULT_VISION_MODEL,
         client_pool=_CLIENT_POOL,
         extra_body=_build_extra_body(),
+        request_options=_build_request_options(),
     )

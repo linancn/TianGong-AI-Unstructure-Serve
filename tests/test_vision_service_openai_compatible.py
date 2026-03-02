@@ -58,6 +58,7 @@ def test_openai_compatible_passes_extra_body(monkeypatch):
         default_model="unused",
         client_pool=pool,
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        request_options={"temperature": 1.0, "top_p": 1.0},
     )
 
     assert result == "ok"
@@ -65,6 +66,8 @@ def test_openai_compatible_passes_extra_body(monkeypatch):
     assert completions.calls[0]["extra_body"] == {
         "chat_template_kwargs": {"enable_thinking": False}
     }
+    assert completions.calls[0]["temperature"] == 1.0
+    assert completions.calls[0]["top_p"] == 1.0
 
 
 def test_openai_compatible_omits_extra_body_when_empty(monkeypatch):
@@ -103,10 +106,20 @@ def test_vllm_vision_defaults_to_disable_thinking(monkeypatch):
     result = vision_vllm.vision_completion_vllm("fake.jpg")
 
     assert result == "ok"
-    assert captured["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert captured["request_options"] == {
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "presence_penalty": 2.0,
+    }
+    assert captured["extra_body"] == {
+        "top_k": 40,
+        "min_p": 0.0,
+        "repetition_penalty": 1.0,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
 
 
-def test_vllm_vision_allows_enable_thinking_override(monkeypatch):
+def test_vllm_vision_allows_sampling_env_override(monkeypatch):
     captured = {}
 
     monkeypatch.setattr(vision_vllm, "_CLIENT_POOL", _DummyVllmPool())
@@ -117,8 +130,24 @@ def test_vllm_vision_allows_enable_thinking_override(monkeypatch):
 
     monkeypatch.setattr(vision_vllm, "vision_completion_openai_compatible", _fake_openai_compatible)
     monkeypatch.setenv("VLLM_ENABLE_THINKING", "true")
+    monkeypatch.setenv("VLLM_VISION_TEMPERATURE", "0.33")
+    monkeypatch.setenv("VLLM_VISION_TOP_P", "0.77")
+    monkeypatch.setenv("VLLM_VISION_TOP_K", "64")
+    monkeypatch.setenv("VLLM_VISION_MIN_P", "0.09")
+    monkeypatch.setenv("VLLM_VISION_PRESENCE_PENALTY", "1.2")
+    monkeypatch.setenv("VLLM_VISION_REPETITION_PENALTY", "1.05")
 
     result = vision_vllm.vision_completion_vllm("fake.jpg")
 
     assert result == "ok"
-    assert captured["extra_body"] == {"chat_template_kwargs": {"enable_thinking": True}}
+    assert captured["request_options"] == {
+        "temperature": 0.33,
+        "top_p": 0.77,
+        "presence_penalty": 1.2,
+    }
+    assert captured["extra_body"] == {
+        "top_k": 64,
+        "min_p": 0.09,
+        "repetition_penalty": 1.05,
+        "chat_template_kwargs": {"enable_thinking": True},
+    }
