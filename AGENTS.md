@@ -42,6 +42,7 @@
   - 统一调度 OpenAI、Gemini、vLLM 视觉大模型；OpenAI 与 vLLM 通过 `vision_service_openai_compatible.py` 共用 OpenAI-compatible 客户端池（支持多个 base_url 轮询），OpenAI 需配置 `OPENAI_API_KEY`，vLLM 使用 `VLLM_BASE_URLS`/`VLLM_BASE_URL`（可逗号分隔）或 `VLLM_API_KEY`，兼容 `LLM_BASE_URLS`/`LLM_BASE_URL` 别名。
   - 提示词构建集中在 `vision_prompts.py`，默认文案已明确要求模型直接输出核心洞察，禁止使用“根据您提供的上下文信息”“以下是”等前置客套语。
   - 当 vLLM 仅提供 base_url 而未配置密钥时，会使用占位 key（`not-required`）落到相同的 OpenAI-compatible 请求路径。
+  - vLLM 视觉请求会通过 OpenAI-compatible `extra_body.chat_template_kwargs.enable_thinking` 显式控制推理模式：默认 `false`（更偏向低延迟），可通过环境变量 `VLLM_ENABLE_THINKING=true` 开启。
   - `/mineru_with_images` 的图像描述按 `VISION_BATCH_SIZE` 分批并发调用视觉服务（默认 3、下限 1），上下文在调用前统一基于文本/列表/表格/图像 caption 计算（受 `VISION_CONTEXT_WINDOW` 控制），不会再把已生成的视觉描述写回上下文；图片无需连续也可并行，识别结果最终按原文顺序回填。
 - **两段式 MinerU+视觉并行（新增示例服务）**  
   - 新增 `src/services/two_stage_pipeline.py` 定义独立 Celery 应用与任务：`two_stage.parse`（仅 MinerU 解析，GPU 队列）、`two_stage.vision`（单图视觉请求，视觉队列）、`two_stage.merge`（汇总）、`two_stage.dispatch`（fan-out+合并 orchestrator）。队列名可由 `CELERY_TASK_PARSE_QUEUE`/`CELERY_TASK_VISION_QUEUE`/`CELERY_TASK_DISPATCH_QUEUE`/`CELERY_TASK_MERGE_QUEUE` 控制，默认沿用 `CELERY_TASK_MINERU_QUEUE` / `default` / `queue_vision`。工作空间默认 `MINERU_TASK_STORAGE_DIR`，解析完成后在 merge 清理。  
@@ -70,6 +71,7 @@
     - `VISION_PROVIDER_CHOICES`、`VISION_MODELS_*`：视觉模型白名单。  
   - `VISION_BATCH_SIZE`：`/mineru_with_images` 视觉描述的批处理并发度（默认 3，最小 1），调整以配合模型限流。  
   - `VLLM_BASE_URL` / `VLLM_BASE_URLS` / `VLLM_API_KEY`：指定 vLLM 视觉服务地址/凭证，支持逗号分隔配置多实例，按轮询方式调用（`.secrets/secrets.toml` 支持 `BASE_URL` 与 `BASE_URLS` 两种字段），兼容 `LLM_BASE_URL`/`LLM_BASE_URLS` 环境别名。  
+  - `VLLM_ENABLE_THINKING`：控制 vLLM 多模态请求 `chat_template_kwargs.enable_thinking`（默认 false；设置为 `true/1/yes/on` 可开启思维链式推理，通常会增加响应时延）。  
     - `MINIO_*`：MinIO 凭证与目标桶。  
     - `CUDA_VISIBLE_DEVICES`：运行时显卡绑定。  
     - `MINERU_HYBRID_BATCH_RATIO` / `MINERU_HYBRID_FORCE_PIPELINE_ENABLE`：hybrid-* 小模型 batch 倍率（默认 8）与强制文本提取走小模型（默认 false）；仅 hybrid 模式生效。  

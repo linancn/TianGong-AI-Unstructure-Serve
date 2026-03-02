@@ -1,5 +1,5 @@
 import os
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from src.config.config import VLLM_API_KEY, VLLM_BASE_URL, VLLM_BASE_URLS
 from src.services.vision_service_openai_compatible import (
@@ -9,6 +9,7 @@ from src.services.vision_service_openai_compatible import (
 
 DEFAULT_VISION_MODEL = "Qwen/Qwen3-VL-30B-A3B-Instruct-FP8"
 _FALLBACK_API_KEY = "not-required"
+_ENABLE_THINKING_ENV = "VLLM_ENABLE_THINKING"
 
 
 def _resolve_api_key() -> str:
@@ -51,6 +52,17 @@ def has_vllm_credentials() -> bool:
     return bool(_resolve_base_urls() or _has_configured_api_key())
 
 
+def _env_enable_thinking() -> bool:
+    raw_value = os.getenv(_ENABLE_THINKING_ENV)
+    if raw_value is None:
+        return False
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _build_extra_body() -> Dict[str, Dict[str, Any]]:
+    return {"chat_template_kwargs": {"enable_thinking": _env_enable_thinking()}}
+
+
 _CLIENT_POOL = OpenAICompatibleClientPool(
     api_key=_resolve_api_key(),
     base_urls=_resolve_base_urls(),
@@ -76,4 +88,5 @@ def vision_completion_vllm(
         prompt=prompt,
         default_model=DEFAULT_VISION_MODEL,
         client_pool=_CLIENT_POOL,
+        extra_body=_build_extra_body(),
     )

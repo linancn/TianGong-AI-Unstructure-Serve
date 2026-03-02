@@ -4,12 +4,12 @@
       "name": "mineru-vllm-server",
       "cwd": ".",
       "script": ".venv/bin/mineru-vllm-server",
-      "args": "--port 30000 --data-parallel-size 4",
+      "args": "--port 30000 --data-parallel-size 3",
       "exec_mode": "fork",
       "interpreter": "none",
       "env": {
         "MINERU_MODEL_SOURCE": "modelscope",
-        "CUDA_VISIBLE_DEVICES": "0,1,2,3"
+        "CUDA_VISIBLE_DEVICES": "0,1,2"
       }
     }
   ]

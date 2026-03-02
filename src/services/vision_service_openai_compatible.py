@@ -1,7 +1,7 @@
 import base64
 from itertools import cycle
 from threading import Lock
-from typing import Iterator, List, Optional, Sequence
+from typing import Any, Dict, Iterator, List, Optional, Sequence
 
 from openai import OpenAI
 
@@ -64,14 +64,15 @@ def vision_completion_openai_compatible(
     prompt: Optional[str] = None,
     default_model: str,
     client_pool: OpenAICompatibleClientPool,
+    extra_body: Optional[Dict[str, Any]] = None,
 ) -> str:
     base64_image = encode_image(image_path)
     prompt_text = build_vision_prompt(context, prompt)
 
     client = client_pool.get_client()
-    response = client.chat.completions.create(
-        model=model or default_model,
-        messages=[
+    request_payload = {
+        "model": model or default_model,
+        "messages": [
             {
                 "role": "user",
                 "content": [
@@ -83,5 +84,11 @@ def vision_completion_openai_compatible(
                 ],
             }
         ],
+    }
+    if extra_body:
+        request_payload["extra_body"] = extra_body
+
+    response = client.chat.completions.create(
+        **request_payload,
     )
     return response.choices[0].message.content
