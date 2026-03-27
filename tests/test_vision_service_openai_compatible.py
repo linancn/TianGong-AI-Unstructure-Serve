@@ -1,3 +1,5 @@
+import pytest
+
 import src.services.vision_service_openai_compatible as openai_compatible
 import src.services.vision_service_vllm as vision_vllm
 
@@ -87,8 +89,14 @@ def test_openai_compatible_omits_extra_body_when_empty(monkeypatch):
 
 
 class _DummyVllmPool:
+    def __init__(self, clients=None):
+        self.clients = list(clients or [object()])
+
     def has_clients(self) -> bool:
-        return True
+        return bool(self.clients)
+
+    def get_clients_in_priority_order(self):
+        return list(self.clients)
 
 
 def test_vllm_vision_defaults_to_disable_thinking(monkeypatch):
@@ -151,3 +159,39 @@ def test_vllm_vision_allows_sampling_env_override(monkeypatch):
         "repetition_penalty": 1.05,
         "chat_template_kwargs": {"enable_thinking": True},
     }
+
+
+def test_vllm_requires_base_url(monkeypatch):
+    monkeypatch.setattr(vision_vllm, "_resolve_base_urls", lambda: [])
+    assert vision_vllm.has_vllm_credentials() is False
+
+
+def test_vllm_vision_retries_next_client(monkeypatch):
+    attempts = []
+
+    monkeypatch.setattr(vision_vllm, "_CLIENT_POOL", _DummyVllmPool(["first", "second"]))
+
+    def _fake_openai_compatible(*args, **kwargs):
+        attempts.append(kwargs["client_pool"].get_client())
+        if len(attempts) == 1:
+            raise RuntimeError("first endpoint down")
+        return "ok"
+
+    monkeypatch.setattr(vision_vllm, "vision_completion_openai_compatible", _fake_openai_compatible)
+
+    result = vision_vllm.vision_completion_vllm("fake.jpg")
+
+    assert result == "ok"
+    assert attempts == ["first", "second"]
+
+
+def test_vllm_vision_raises_when_all_clients_fail(monkeypatch):
+    monkeypatch.setattr(vision_vllm, "_CLIENT_POOL", _DummyVllmPool(["first", "second"]))
+
+    def _fake_openai_compatible(*args, **kwargs):
+        raise RuntimeError(f"{kwargs['client_pool'].get_client()} down")
+
+    monkeypatch.setattr(vision_vllm, "vision_completion_openai_compatible", _fake_openai_compatible)
+
+    with pytest.raises(RuntimeError, match="All configured vLLM vision endpoints failed"):
+        vision_vllm.vision_completion_vllm("fake.jpg")

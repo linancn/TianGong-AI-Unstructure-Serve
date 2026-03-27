@@ -509,7 +509,7 @@ def vision_task(
         return {"seq": seq, "vision_text": vision_text}
     except Exception as exc:  # noqa: BLE001 - external call may fail
         logger.info("Vision call failed for seq=%s: %s", seq, exc)
-        return {"seq": seq, "vision_text": job.get("base_text") or "", "error": str(exc)}
+        raise RuntimeError(f"Vision call failed for seq={seq}: {exc}") from exc
 
 
 @celery_app.task(name="two_stage.merge", acks_late=True)

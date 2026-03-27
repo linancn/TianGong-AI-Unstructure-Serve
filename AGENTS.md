@@ -39,12 +39,12 @@
   - 按 GPU ID 创建 `ProcessPoolExecutor`，每个任务在独立子进程执行，并设有硬超时以防解析卡死。  
   - `/gpu/status` 路由可以查询每块 GPU 的排队任务数及运行情况。
 - **视觉问答/解析**（`src/services/vision_service.py`）  
-  - 统一调度 OpenAI、Gemini、vLLM 视觉大模型；OpenAI 与 vLLM 通过 `vision_service_openai_compatible.py` 共用 OpenAI-compatible 客户端池（支持多个 base_url 轮询），OpenAI 需配置 `OPENAI_API_KEY`，vLLM 使用 `VLLM_BASE_URLS`/`VLLM_BASE_URL`（可逗号分隔）或 `VLLM_API_KEY`，兼容 `LLM_BASE_URLS`/`LLM_BASE_URL` 别名。
+  - 统一调度 OpenAI、Gemini、vLLM 视觉大模型；当前默认部署配置（`.env` / `.env.example` / `ecosystem.config.json` / `ecosystem.quatro.json`）已收口到 vLLM：`VISION_PROVIDER_CHOICES=vllm`、`VISION_PROVIDER=vllm`，现有调用默认不会再回退到 OpenAI / Gemini。OpenAI 与 vLLM 通过 `vision_service_openai_compatible.py` 共用 OpenAI-compatible 客户端池；vLLM 必须配置 `VLLM_BASE_URLS`/`VLLM_BASE_URL` 才视为可用，`VLLM_API_KEY` 仅作为可选认证头。
   - 提示词构建集中在 `vision_prompts.py`，默认文案已明确要求模型直接输出核心洞察，禁止使用“根据您提供的上下文信息”“以下是”等前置客套语。
-  - 当 vLLM 仅提供 base_url 而未配置密钥时，会使用占位 key（`not-required`）落到相同的 OpenAI-compatible 请求路径。
+  - 当 vLLM 仅提供 base_url 而未配置密钥时，会使用占位 key（`not-required`）落到相同的 OpenAI-compatible 请求路径；当配置了多个 `VLLM_BASE_URLS` 时，每次请求会按轮换顺序依次尝试所有 endpoint，全部失败才抛错。
   - vLLM 视觉请求会通过 OpenAI-compatible `extra_body.chat_template_kwargs.enable_thinking` 显式控制推理模式：默认 `false`（更偏向低延迟），可通过环境变量 `VLLM_ENABLE_THINKING=true` 开启。
   - vLLM 视觉请求默认带采样参数：`temperature=1.0`、`top_p=1.0`、`presence_penalty=2.0`，以及 `extra_body.top_k=40`、`extra_body.min_p=0.0`、`extra_body.repetition_penalty=1.0`；可通过 `VLLM_VISION_*` 环境变量覆盖。
-  - `/mineru_with_images` 的图像描述按 `VISION_BATCH_SIZE` 分批并发调用视觉服务（默认 3、下限 1），上下文在调用前统一基于文本/列表/表格/图像 caption 计算（受 `VISION_CONTEXT_WINDOW` 控制），不会再把已生成的视觉描述写回上下文；图片无需连续也可并行，识别结果最终按原文顺序回填。
+  - `/mineru_with_images` 的图像描述按 `VISION_BATCH_SIZE` 分批并发调用视觉服务（默认 3、下限 1），上下文在调用前统一基于文本/列表/表格/图像 caption 计算（受 `VISION_CONTEXT_WINDOW` 控制），不会再把已生成的视觉描述写回上下文；图片无需连续也可并行，识别结果最终按原文顺序回填。若视觉调用异常，服务不再退回 caption/footnote 降级文本，而是直接抛错，让同步接口返回 500、Celery 任务失败。
 - **两段式 MinerU+视觉并行（新增示例服务）**  
   - 新增 `src/services/two_stage_pipeline.py` 定义独立 Celery 应用与任务：`two_stage.parse`（仅 MinerU 解析，GPU 队列）、`two_stage.vision`（单图视觉请求，视觉队列）、`two_stage.merge`（汇总）、`two_stage.dispatch`（fan-out+合并 orchestrator）。队列名可由 `CELERY_TASK_PARSE_QUEUE`/`CELERY_TASK_VISION_QUEUE`/`CELERY_TASK_DISPATCH_QUEUE`/`CELERY_TASK_MERGE_QUEUE` 控制，默认沿用 `CELERY_TASK_MINERU_QUEUE` / `default` / `queue_vision`。工作空间默认 `MINERU_TASK_STORAGE_DIR`，解析完成后在 merge 清理。  
   - 两段式 Celery 在 Redis broker 下设置 `broker_transport_options.queue_order_strategy=priority`，多队列 worker 会按 `-Q` 顺序优先消费（例如 `queue_parse_urgent` 优先于 `queue_parse_gpu`）。  
@@ -55,7 +55,7 @@
   - Worker 示例（可按需调整并发）：解析队列 `celery -A src.services.two_stage_pipeline worker -Q queue_parse_gpu -P threads -c 1 -l info`；视觉队列 `celery -A src.services.two_stage_pipeline worker -Q queue_vision -P threads -c 32 -l info`；调度队列 `celery -A src.services.two_stage_pipeline worker -Q queue_dispatch -P threads -c 4 -l info`；汇总队列（处理 merge）`celery -A src.services.two_stage_pipeline worker -Q default -P threads -c 4 -l info`。调度与汇总拆分可避免 dispatch 阻塞 merge 导致 chord 一直处于 active 状态。`submit_two_stage_job` 帮助方法可直接在代码中调用。  
   - `queue_*_urgent` 队列名可通过 `CELERY_TASK_*_URGENT_QUEUE` 覆盖，确保与 worker 的 `-Q` 参数一致。  
   - 该示例用于解耦 MinerU 解析与视觉阶段，避免 GPU 和视觉卡互相空转；已通过 `main.py` 暴露路由，可直接在现有服务中访问 `/two_stage/*`，也可按需用独立入口部署。
-  - 两段式解析中如 MinerU 抛异常或未返回内容，`parse_doc` 会直接抛出 `RuntimeError`（包含 “do_parse returned None” 等提示），并将异常继续冒泡，`two_stage.parse` 会捕获并带上源文件路径返回给 Flower，避免再出现 “cannot unpack non-iterable NoneType object” 之类的报错。视觉阶段与 `/mineru_with_images` 对齐：`provider`/`model`/`prompt`（空字符串会清空为 None）会透传给 `vision_completion`，可通过请求参数或 `VISION_PROVIDER`/`VISION_MODEL` 环境变量指定模型；路由层使用 `VisionProvider`/`VisionModel` 进行校验，Swagger 会给出枚举提示。  
+  - 两段式解析中如 MinerU 抛异常或未返回内容，`parse_doc` 会直接抛出 `RuntimeError`（包含 “do_parse returned None” 等提示），并将异常继续冒泡，`two_stage.parse` 会捕获并带上源文件路径返回给 Flower，避免再出现 “cannot unpack non-iterable NoneType object” 之类的报错。视觉阶段与 `/mineru_with_images` 对齐：`provider`/`model`/`prompt`（空字符串会清空为 None）会透传给 `vision_completion`，可通过请求参数或 `VISION_PROVIDER`/`VISION_MODEL` 环境变量指定模型；路由层使用 `VisionProvider`/`VisionModel` 进行校验，Swagger 会给出枚举提示。视觉调用若抛异常，`two_stage.vision` 现在会直接失败，不再回写 `base_text` 兜底。  
   - 视觉合并规则：若原图有 caption/footnote 则合并为 `<原文本>\n<视觉输出>`（不再添加 “Image Description:” 前缀）；无原始文本时直接用视觉输出，`chunk_type=true` 时图片块标记为 `type="image"`，标题/页眉/页脚仍按原规则打标，视觉输出会清理 `[Page N]`/`[ChunkType=...]` 标记以保证纯文本干净。视觉调用前会过滤图片：面积占比过小（默认 <1%，有 caption 放宽到 0.5%）、极端长宽比（>10:1）、无 caption 且体积过小（默认 <10KB）、固有分辨率过小（最短边 <96px 或像素面积过小）直接跳过；同页超过 5 张也会限流，并按文件哈希去重，减少 logo/边框等噪声送入视觉模型。  
 - PM2 模板：`ecosystem.two_stage.celery.json`（parse/vision/dispatch/merge worker 监听 urgent+normal 队列，按 `-Q` 顺序优先消费：`queue_parse_urgent,queue_parse_gpu`；`queue_vision_urgent,queue_vision`；`queue_dispatch_urgent,queue_dispatch`；`queue_merge_urgent,default`）；`ecosystem.two_stage.flower.json`（两段式 Flower，默认 5556 端口，继承两段式队列环境）。
 
@@ -68,10 +68,10 @@
     - `MINERU_HYBRID_BATCH_RATIO`：hybrid-* 小模型 batch 倍率（默认 8，仅 hybrid 模式有效，用于控制显存占用）。  
     - `MINERU_VLLM_API_KEY` / `MINERU_VLLM_AUTH_HEADER`：为 MinerU `vlm-http-client` 注入 HTTP Authorization 头；优先使用完整的 `MINERU_VLLM_AUTH_HEADER`，否则从 `MINERU_VLLM_API_KEY` 生成 `Bearer <key>`。  
     - `MINERU_OFFICE_CONVERT_TIMEOUT_SECONDS`：LibreOffice Office→PDF 转换超时时间（默认 180s），超时会终止转换并返回 500。  
-    - `OPENAI_API_KEY` / `GENIMI_API_KEY`：视觉/生成模型凭证，支持以环境变量覆盖默认 secrets。  
-    - `VISION_PROVIDER_CHOICES`、`VISION_MODELS_*`：视觉模型白名单。  
+    - `OPENAI_API_KEY` / `GENIMI_API_KEY`：备用视觉/生成模型凭证，代码仍支持，但默认 `.env` / `.env.example` 已不再把它们加入视觉 provider 白名单。  
+    - `VISION_PROVIDER` / `VISION_PROVIDER_CHOICES` / `VISION_MODELS_*`：视觉 provider 选择与模型白名单；当前默认配置为 `VISION_PROVIDER=vllm`、`VISION_PROVIDER_CHOICES=vllm`。  
   - `VISION_BATCH_SIZE`：`/mineru_with_images` 视觉描述的批处理并发度（默认 3，最小 1），调整以配合模型限流。  
-  - `VLLM_BASE_URL` / `VLLM_BASE_URLS` / `VLLM_API_KEY`：指定 vLLM 视觉服务地址/凭证，支持逗号分隔配置多实例，按轮询方式调用（`.secrets/secrets.toml` 支持 `BASE_URL` 与 `BASE_URLS` 两种字段），兼容 `LLM_BASE_URL`/`LLM_BASE_URLS` 环境别名。  
+  - `VLLM_BASE_URL` / `VLLM_BASE_URLS` / `VLLM_API_KEY`：指定 vLLM 视觉服务地址/凭证；必须提供 `VLLM_BASE_URL` 或 `VLLM_BASE_URLS` 才会启用 vLLM 视觉 provider，`VLLM_API_KEY` 仅作为可选认证头。配置多个 URL 时，每次请求会按轮换顺序逐个尝试直到成功或全部失败。  
   - `VLLM_ENABLE_THINKING`：控制 vLLM 多模态请求 `chat_template_kwargs.enable_thinking`（默认 false；设置为 `true/1/yes/on` 可开启思维链式推理，通常会增加响应时延）。  
   - `VLLM_VISION_TEMPERATURE` / `VLLM_VISION_TOP_P` / `VLLM_VISION_PRESENCE_PENALTY`：控制 vLLM 多模态请求的采样参数（默认 `1.0` / `1.0` / `2.0`）。  
   - `VLLM_VISION_TOP_K` / `VLLM_VISION_MIN_P` / `VLLM_VISION_REPETITION_PENALTY`：控制 vLLM 多模态请求 `extra_body` 参数（默认 `40` / `0.0` / `1.0`）。  
@@ -119,7 +119,7 @@
   uv run --group dev ruff check src
   uv run --group dev pytest
   ```
-- 新增的 `tests/` Pytest 测试工程覆盖配置环境变量覆盖逻辑、Markdown/文件转换工具、MinIO 封装、Pydantic 模型以及 `/health`、`/gpu/status` 等轻量路由；`tests/conftest.py` 会注入轻量替身（GPU 调度器、MinIO/pypdfium2 stub），无需真实外部依赖即可运行。两段式相关：`tests/test_two_stage_router.py` 覆盖 `/two_stage/task` 的无扩展名错误与成功入队（通过 monkeypatch stub 掉 Celery 调度），批量送入两段式 Celery 的脚本移到 `src/scripts/two_stage_enqueue.py`（每批 5000 个提交；默认读取 `pdfs` 目录提交 `/two_stage/task`，轮询完成后将响应中的 result 持久化到 `pickle/<stem>.pkl`，失败/超时会在脚本内自动重试至多 3 次，超限后记录并继续其余文件；输入/输出目录用 `TWO_STAGE_INPUT_DIR`/`TWO_STAGE_OUTPUT_DIR` 覆盖，兼容 `ESG_INPUT_DIR`/`ESG_OUTPUT_DIR`，轮询间隔/超时用 `TWO_STAGE_POLL_INTERVAL`/`TWO_STAGE_POLL_TIMEOUT` 覆盖，优先级用 `TWO_STAGE_PRIORITY`（normal/urgent）控制，超时计时从 Celery 状态变为 `STARTED` 后开始）；`tests/test_two_stage_pipeline_parse.py` 验证 MinerU 返回空/异常时的错误传播，确保任务失败能在 Flower 中看到具体原因。
+- 新增的 `tests/` Pytest 测试工程覆盖配置环境变量覆盖逻辑、Markdown/文件转换工具、MinIO 封装、Pydantic 模型以及 `/health`、`/gpu/status` 等轻量路由；`tests/conftest.py` 会注入轻量替身（GPU 调度器、MinIO/pypdfium2 stub），无需真实外部依赖即可运行。视觉相关新增 `tests/test_mineru_with_images_service.py`（验证视觉调用失败会直接抛错）、扩展 `tests/test_vision_service_openai_compatible.py`（验证 vLLM 需要 base URL 才视为可用、多个 endpoint 会顺序尝试）以及 `tests/test_two_stage_pipeline_parse.py`（验证 `two_stage.vision` 失败时不再回写 `base_text`）。两段式相关：`tests/test_two_stage_router.py` 覆盖 `/two_stage/task` 的无扩展名错误与成功入队（通过 monkeypatch stub 掉 Celery 调度），批量送入两段式 Celery 的脚本移到 `src/scripts/two_stage_enqueue.py`（每批 5000 个提交；默认读取 `pdfs` 目录提交 `/two_stage/task`，轮询完成后将响应中的 result 持久化到 `pickle/<stem>.pkl`，失败/超时会在脚本内自动重试至多 3 次，超限后记录并继续其余文件；输入/输出目录用 `TWO_STAGE_INPUT_DIR`/`TWO_STAGE_OUTPUT_DIR` 覆盖，兼容 `ESG_INPUT_DIR`/`ESG_OUTPUT_DIR`，轮询间隔/超时用 `TWO_STAGE_POLL_INTERVAL`/`TWO_STAGE_POLL_TIMEOUT` 覆盖，优先级用 `TWO_STAGE_PRIORITY`（normal/urgent）控制，超时计时从 Celery 状态变为 `STARTED` 后开始）。
 - `src/scripts/read_pickle.py` 可将 pickle 文件转存为 JSON，默认输出到同名 `.json` 文件；可用 `--field result` 仅导出解析结果，`-o` 自定义输出路径。未传入参数时会自动选择 `./pickle` 目录下最新的 `.pkl` 进行转换，便于直接查看两段式任务落地的 pickle 内容。
 - 代码中针对 Ruff 规则（F401/BLE001/E722 等）已统一清理未使用依赖，并将异常捕获限定在预期类型；后续新增 try/except 块时请保持同等粒度。
 - 图像增强流程的 `_log_vision_prompt` 使用 `logger.debug` 输出前后文，默认不会污染 info 级日志，如需调试可上调日志级别。

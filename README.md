@@ -51,6 +51,9 @@ sudo apt install -y graphicsmagick
 - `MINERU_DEFAULT_BACKEND` controls the parsing backend (default `vlm-http-client`; options: `pipeline`, `vlm-transformers`, `vlm-vllm-engine`, `vlm-lmdeploy-engine`, `vlm-http-client`, `vlm-mlx-engine`).
 - `MINERU_DEFAULT_LANG` sets the OCR language hint for pipeline mode (default `ch`).
 - `MINERU_DEFAULT_METHOD` sets the pipeline parse method (`auto`/`txt`/`ocr`, default `auto`).
+- Vision defaults are now vLLM-only: `.env` / `.env.example` set `VISION_PROVIDER=vllm` and `VISION_PROVIDER_CHOICES=vllm`; image-aware routes no longer fall back to OpenAI / Gemini by default.
+- `VLLM_BASE_URLS` / `VLLM_BASE_URL` is now required for the vLLM vision provider; `VLLM_API_KEY` is optional auth only. When multiple URLs are configured, each image request tries them in rotated order until one succeeds or all fail.
+- `/mineru_with_images`, `/mineru_with_images/task`, and `/two_stage/task` no longer degrade vision failures back to caption/footnote text. If the vision stage raises, the sync API returns 500 and async/Celery tasks fail.
 - MinerU 后端通过 `MINERU_DEFAULT_BACKEND` 环境变量配置；允许值：`pipeline`/`vlm-transformers`/`vlm-vllm-engine`/`vlm-lmdeploy-engine`/`vlm-http-client`/`vlm-mlx-engine`，额外接受 `hybrid-auto-engine`/`hybrid-http-client`（当前 MinerU 2.7.0 wheel 未内置 hybrid 实现，内部会回退到 `vlm-vllm-engine`/`vlm-http-client`）。API 不再接受表单参数覆盖后端。
 - `MINERU_VLLM_SERVER_URLS` / `MINERU_VLLM_SERVER_URL` (or `MINERU_VLM_SERVER_URLS` / `MINERU_VLM_SERVER_URL`) list VLM endpoints; comma-separated or JSON array values are accepted. If unset, the service falls back to `http://127.0.0.1:30000`.
 - `MINERU_HYBRID_BATCH_RATIO` 控制 hybrid-* 后端小模型 batch 倍率（默认 8）；仅在 hybrid 模式有效，用于权衡显存占用。
@@ -82,6 +85,10 @@ nohup env MINERU_MODEL_SOURCE=modelscope CUDA_VISIBLE_DEVICES=2 uvicorn src.main
 
 npm i -g pm2
 watch -n 1 nvidia-smi
+
+# 使用 pm2 管理进程
+pm2 save
+pm2 resurrect
 
 # 启动所有服务
 pm2 start ecosystem.vllm.config.json

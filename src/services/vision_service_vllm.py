@@ -54,17 +54,8 @@ def _resolve_base_urls() -> List[str]:
     return _parse_base_urls(VLLM_BASE_URL)
 
 
-def _has_configured_api_key() -> bool:
-    env_override = os.getenv("VLLM_API_KEY")
-    if env_override and env_override.strip():
-        return True
-    if VLLM_API_KEY and VLLM_API_KEY.strip():
-        return True
-    return False
-
-
 def has_vllm_credentials() -> bool:
-    return bool(_resolve_base_urls() or _has_configured_api_key())
+    return bool(_resolve_base_urls())
 
 
 def _env_enable_thinking() -> bool:
@@ -132,11 +123,20 @@ def _build_extra_body() -> Dict[str, Any]:
     }
 
 
+_RESOLVED_BASE_URLS = _resolve_base_urls()
 _CLIENT_POOL = OpenAICompatibleClientPool(
-    api_key=_resolve_api_key(),
-    base_urls=_resolve_base_urls(),
-    fallback_api_key=_FALLBACK_API_KEY,
+    api_key=_resolve_api_key() if _RESOLVED_BASE_URLS else "",
+    base_urls=_RESOLVED_BASE_URLS,
+    fallback_api_key=_FALLBACK_API_KEY if _RESOLVED_BASE_URLS else None,
 )
+
+
+class _SingleClientPool:
+    def __init__(self, client: Any):
+        self._client = client
+
+    def get_client(self) -> Any:
+        return self._client
 
 
 def vision_completion_vllm(
@@ -148,15 +148,35 @@ def vision_completion_vllm(
     if not _CLIENT_POOL.has_clients():
         raise RuntimeError(
             "vLLM vision client is not configured. Set VLLM_BASE_URLS / VLLM_BASE_URL"
-            " (comma-separated) or VLLM_API_KEY."
+            " (comma-separated). VLLM_API_KEY is optional auth only."
         )
-    return vision_completion_openai_compatible(
-        image_path,
-        context=context,
-        model=model,
-        prompt=prompt,
-        default_model=DEFAULT_VISION_MODEL,
-        client_pool=_CLIENT_POOL,
-        extra_body=_build_extra_body(),
-        request_options=_build_request_options(),
-    )
+
+    errors: List[str] = []
+    last_error: Optional[Exception] = None
+    clients = _CLIENT_POOL.get_clients_in_priority_order()
+
+    for attempt, client in enumerate(clients, start=1):
+        try:
+            return vision_completion_openai_compatible(
+                image_path,
+                context=context,
+                model=model,
+                prompt=prompt,
+                default_model=DEFAULT_VISION_MODEL,
+                client_pool=_SingleClientPool(client),
+                extra_body=_build_extra_body(),
+                request_options=_build_request_options(),
+            )
+        except Exception as exc:  # noqa: BLE001 - upstream client may fail
+            last_error = exc
+            errors.append(str(exc))
+            logger.warning(
+                "vLLM vision attempt %s/%s failed: %s",
+                attempt,
+                len(clients),
+                exc,
+            )
+
+    assert last_error is not None
+    detail = "; ".join(error for error in errors if error) or str(last_error)
+    raise RuntimeError(f"All configured vLLM vision endpoints failed: {detail}") from last_error

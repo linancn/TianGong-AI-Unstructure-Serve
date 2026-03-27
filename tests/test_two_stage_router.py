@@ -17,6 +17,8 @@ def test_two_stage_rejects_missing_extension(client):
 
 def test_two_stage_enqueues_and_returns_task_id(client, monkeypatch, tmp_path):
     workspace_root = tmp_path / "workspace"
+    provider_value = next(iter(VisionProvider))
+    model_value = next(iter(VisionModel))
 
     def fake_ensure_workspace() -> Path:
         workspace_root.mkdir(parents=True, exist_ok=True)
@@ -87,8 +89,8 @@ def test_two_stage_enqueues_and_returns_task_id(client, monkeypatch, tmp_path):
             "chunk_type": "true",
             "return_txt": "true",
             "priority": "urgent",
-            "provider": VisionProvider.OPENAI.value,
-            "model": VisionModel.OPENAI_GPT_5_MINI.value,
+            "provider": provider_value.value,
+            "model": model_value.value,
             "prompt": "describe",
         },
         files={"file": ("sample.pdf", b"%PDF-1.4 content", "application/pdf")},
@@ -100,8 +102,8 @@ def test_two_stage_enqueues_and_returns_task_id(client, monkeypatch, tmp_path):
     assert captured["processing_path"].endswith("sample.pdf")
     assert captured["chunk_type"] is True
     assert captured["return_txt"] is True
-    assert captured["provider"] == VisionProvider.OPENAI
-    assert captured["model"] == VisionModel.OPENAI_GPT_5_MINI
+    assert captured["provider"] == provider_value
+    assert captured["model"] == model_value
     assert captured["prompt"] == "describe"
     assert captured["parse_queue"] == "queue_parse_urgent"
     assert captured["vision_queue"] == "queue_vision_urgent"

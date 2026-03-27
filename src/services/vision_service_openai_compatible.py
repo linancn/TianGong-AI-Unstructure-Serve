@@ -1,7 +1,6 @@
 import base64
-from itertools import cycle
 from threading import Lock
-from typing import Any, Dict, Iterator, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 from openai import OpenAI
 
@@ -29,9 +28,7 @@ class OpenAICompatibleClientPool:
 
         self._clients = self._build_clients(resolved_key, resolved_urls)
         self._single = self._clients[0] if len(self._clients) == 1 else None
-        self._cycle: Optional[Iterator[OpenAI]] = (
-            cycle(self._clients) if len(self._clients) > 1 else None
-        )
+        self._next_index = 0
         self._lock = Lock()
 
     @staticmethod
@@ -46,14 +43,20 @@ class OpenAICompatibleClientPool:
     def has_clients(self) -> bool:
         return bool(self._clients)
 
-    def get_client(self) -> OpenAI:
+    def get_clients_in_priority_order(self) -> List[OpenAI]:
         if not self._clients:
             raise RuntimeError("OpenAI-compatible vision client is not configured.")
         if self._single:
-            return self._single
-        assert self._cycle is not None  # for mypy
+            return [self._single]
+
         with self._lock:
-            return next(self._cycle)
+            start_index = self._next_index
+            self._next_index = (self._next_index + 1) % len(self._clients)
+
+        return [*self._clients[start_index:], *self._clients[:start_index]]
+
+    def get_client(self) -> OpenAI:
+        return self.get_clients_in_priority_order()[0]
 
 
 def vision_completion_openai_compatible(

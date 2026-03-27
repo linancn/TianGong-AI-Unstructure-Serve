@@ -382,12 +382,12 @@ def parse_with_images(
                                 chunk["type"] = "image"
                             image_results[id(job["item"])] = chunk
                     except Exception as exc:  # noqa: BLE001 - vision call can fail
-                        logger.info(f"Error processing image {seq}/{total_images}: {str(exc)}")
-                        if base_text.strip():
-                            chunk = {"text": base_text, "page_number": page_number}
-                            if chunk_type:
-                                chunk["type"] = "image"
-                            image_results[id(job["item"])] = chunk
+                        message = (
+                            f"Vision analysis failed for image {seq}/{total_images} "
+                            f"on page {page_number}: {exc}"
+                        )
+                        logger.info(message)
+                        raise RuntimeError(message) from exc
 
             image_count += len(batch)
 

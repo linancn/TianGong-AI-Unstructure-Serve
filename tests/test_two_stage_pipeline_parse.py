@@ -83,3 +83,20 @@ def test_vision_task_passes_provider_model_and_normalized_prompt(monkeypatch):
     assert captured["provider"] == "vllm"
     assert captured["model"] == "demo-model"
     assert captured["prompt"] == "hello"
+
+
+def test_vision_task_raises_when_completion_fails(monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("vision down")
+
+    monkeypatch.setattr(two_stage_pipeline, "vision_completion", boom)
+
+    job = {
+        "seq": 7,
+        "img_path": "/tmp/fake.jpg",
+        "context_payload": "ctx",
+        "base_text": "base",
+    }
+
+    with pytest.raises(RuntimeError, match="Vision call failed for seq=7"):
+        two_stage_pipeline.vision_task.run(job, provider="vllm", model="demo-model")
