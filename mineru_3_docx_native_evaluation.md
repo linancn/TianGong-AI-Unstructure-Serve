@@ -19,6 +19,95 @@
 - **但它不能等价覆盖当前服务默认链路依赖的接口语义。**
 - **当前结论是不实施默认切换。**
 
+后续实现状态补充：
+
+- **默认 Office 路径仍未切换。**
+- **同步 `POST /mineru_with_images` 已新增一个受限折中方案：仅在 `.docx + return_txt=true` 时，用原生 DOCX 重新生成 `txt`，并把图片识别内容按文档流顺序插回；`result` 仍沿用原有 `DOCX -> PDF -> vllm` 路径。**
+- **该折中方案不改变默认 JSON 结果、页码、MinIO 资产合同，也不影响 Celery 任务。**
+- **2026-03-29 又对该折中方案做了一次收紧：native DOCX txt-only 分支中的图片识别改为“严格 OCR / 可见内容抽取”模式，不再把 DOCX 图片 caption/footnote 直接并入输出，也不允许根据上下文做人名、机构、网站、项目等推断。**
+
+## 已实施方案补充评估
+
+### 场景
+
+本节只评估已经落地的这一条受限路径：
+
+- 同步 `POST /mineru_with_images`
+- 文件类型：`.docx`
+- 参数：`return_txt=true`
+
+其余行为保持不变：
+
+- `result` 仍走 `DOCX -> PDF -> vllm`
+- `txt` 走原生 DOCX + 图片识别插回
+- `VISION_CONTEXT_WINDOW` 仍用于控制图片前后文窗口
+
+### 为什么还要再收紧一次
+
+第一次实现折中方案后，`txt` 虽然已经切到原生 DOCX，但图片识别仍然沿用了偏“图像理解/总结”的提示方式，导致 `公众号.docx` 中出现了几类明显不该出现在 `txt` 里的内容：
+
+- 把截图解释成某个学术主页或 GitHub 组织页
+- 输出 `Context before:` / `Context after:` 这类提示词残留
+- 把 `string` 这类占位 caption 混进正文
+- 对图里的结构图、流程图做长段解释，而不是尽量按可见文字转写
+
+因此这次实现把 native DOCX txt-only 分支的图片识别目标进一步收窄为：
+
+- 只做 OCR / visible text extraction
+- 只允许输出图里直接可见的文字或极短的字面描述
+- 不允许根据上下文做扩写、归纳、推断或“帮你解释这张图”
+
+### `公众号.docx` 回归结果
+
+使用仓库根目录下的 `公众号.docx` 做真实回归测试，命中的是当前已上线的同步 `.docx + return_txt=true` 路径。
+
+结果摘要如下：
+
+- `backend = vlm-http-client`
+- `result_count = 93`
+- `txt_len = 5797`
+- `contains_context_before = false`
+- `contains_context_after = false`
+- `contains_string_line = false`
+- `contains_researchgate = false`
+- `contains_github_org = false`
+- `contains_based_on_context = false`
+- `contains_system_architecture_diagram = false`
+- `contains_github_profile_screenshot_content = false`
+
+这说明上一轮最明显的“解释型污染”已经被压下去：
+
+- 不再残留 prompt 元文本
+- 不再出现 `string` 这种图片占位值
+- 不再把截图脑补成 `ResearchGate` / `GitHub organization page`
+- 不再输出“System Architecture Diagram”“GitHub Profile Screenshot Content”这类编排式小标题
+
+### 当前输出形态
+
+收紧之后，`txt` 中图片插入内容更接近“读图抄字”：
+
+- 海报页会转写出讲者、时间、地点、简介等可见文本
+- 流程图、框图、信息图会尽量输出块内可见文字
+- 原生 DOCX 正文仍保持之前的高保真优势
+
+这比第一版“带解释的图片总结”更适合当前 `return_txt` 的定位。
+
+### 仍然存在的边界
+
+虽然结果明显更好了，但这条路径仍然不是“纯 OCR 引擎”：
+
+- 个别复杂信息图仍可能出现少量解释性串联，而不只是逐字转写
+- 这种残余主要出现在结构复杂、视觉块密集的图里
+- 仅靠 prompt 可以显著降低问题，但不能保证完全为零
+
+`公众号.docx` 的本次回归里，前面那几类明显幻觉已经消失，但仍能看到少量偏解释性的长句，尤其是在“高水平开源基座助力”相关图示附近。
+
+因此当前结论更新为：
+
+- **native DOCX txt-only + strict OCR prompt 已经可以实用**
+- **它比上一版稳定得多，适合继续保留上线**
+- **但如果目标是“绝对只要 OCR，不要任何解释性残留”，后续还需要额外后处理或替换成更纯的 OCR 型视觉模型**
+
 ## 当前服务行为
 
 当前同步接口的 Office 处理入口在 `src/routers/mineru_router.py`，对于 Office 文件会先执行 `maybe_convert_to_pdf()`，然后再交给 GPU 调度器解析。

@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import pytest
-
 from src.routers import two_stage_router
 from src.services.vision_service import VisionModel, VisionProvider
 

@@ -215,15 +215,22 @@ async def mineru_with_images(
             minio_prefix_value = build_minio_prefix(filename, minio_prefix)
 
         # Dispatch to GPU scheduler; this returns a Future
+        scheduler_options: dict[str, object] = {
+            "chunk_type": chunk_type,
+            "vision_prompt": prompt,
+            "vision_provider": provider,
+            "vision_model": model,
+            "return_txt": return_txt,
+            "backend": backend_value,
+        }
+        if file_ext == ".docx" and return_txt:
+            scheduler_options["txt_from_native_docx"] = True
+            scheduler_options["txt_source_path"] = tmp_path
+
         fut = scheduler.submit(
             processing_path,
             pipeline="images",
-            chunk_type=chunk_type,
-            vision_prompt=prompt,
-            vision_provider=provider,
-            vision_model=model,
-            return_txt=return_txt,
-            backend=backend_value,
+            **scheduler_options,
         )
         payload = await _await_future(fut)
         result_payload = payload.get("result")
@@ -267,7 +274,8 @@ async def mineru_with_images(
         ]
         txt_text = payload.get("txt")
         if return_txt:
-            txt_text = build_plain_text(items)
+            if file_ext != ".docx" or txt_text is None:
+                txt_text = build_plain_text(items)
         chunks_with_pages = [
             (item.text, item.page_number, item.type)
             for item in items
