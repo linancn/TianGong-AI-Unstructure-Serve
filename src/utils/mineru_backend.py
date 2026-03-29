@@ -1,9 +1,7 @@
 import os
 from typing import Optional
 
-# Supported MinerU backends exposed by the service. Hybrid modes are allowed as inputs
-# but are internally mapped to vlm variants because the pinned MinerU 2.7.0 wheel does
-# not actually ship hybrid implementations.
+# Supported MinerU backends exposed by the service.
 SUPPORTED_MINERU_BACKENDS = {
     "pipeline",
     "vlm-transformers",
@@ -15,12 +13,9 @@ SUPPORTED_MINERU_BACKENDS = {
     "hybrid-http-client",
 }
 
-# Fallback mapping for hybrid entries so that callers can pass hybrid-* while we remain
-# on a wheel that lacks hybrid support.
-BACKEND_FALLBACKS = {
-    "hybrid-http-client": "vlm-http-client",
-    "hybrid-auto-engine": "vlm-vllm-engine",
-}
+# Kept as a named constant for testability and to make the 3.x behavior explicit:
+# hybrid backends are now passed through directly.
+BACKEND_FALLBACKS: dict[str, str] = {}
 
 
 def normalize_backend(backend: Optional[str]) -> Optional[str]:
@@ -45,14 +40,14 @@ def normalize_backend(backend: Optional[str]) -> Optional[str]:
 
 
 def resolve_backend(normalized_backend: Optional[str]) -> Optional[str]:
-    """Return the actual backend to pass to MinerU (maps hybrid-* to vlm-* fallbacks)."""
+    """Return the actual backend to pass to MinerU."""
     if normalized_backend is None:
         return None
     return BACKEND_FALLBACKS.get(normalized_backend, normalized_backend)
 
 
 def resolve_backend_from_env() -> Optional[str]:
-    """Load MINERU_DEFAULT_BACKEND from env, normalize, and map to runtime backend."""
+    """Load MINERU_DEFAULT_BACKEND from env, normalize, and return the runtime backend."""
     raw = os.getenv("MINERU_DEFAULT_BACKEND")
     normalized = normalize_backend(raw)
     return resolve_backend(normalized)

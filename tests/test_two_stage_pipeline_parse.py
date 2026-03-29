@@ -13,8 +13,34 @@ def test_parse_doc_raises_when_do_parse_returns_none(monkeypatch, tmp_path):
     monkeypatch.setattr(msf, "read_fn", lambda path: b"fake-pdf-bytes")
     monkeypatch.setattr(msf, "do_parse", lambda *args, **kwargs: None)
 
-    with pytest.raises(RuntimeError, match="do_parse returned None"):
+    with pytest.raises(RuntimeError, match="did not produce sample_content_list.json"):
         msf.parse_doc([fake_pdf], tmp_path)
+
+
+def test_parse_doc_reads_content_list_from_mineru_output(monkeypatch, tmp_path):
+    fake_pdf = tmp_path / "sample.pdf"
+    fake_pdf.write_bytes(b"%PDF-1.4\n")
+
+    monkeypatch.setattr(msf, "read_fn", lambda path: b"fake-pdf-bytes")
+
+    def fake_do_parse(*args, **kwargs):
+        output_dir = Path(kwargs["output_dir"])
+        content_dir = output_dir / "sample" / "hybrid_auto"
+        content_dir.mkdir(parents=True, exist_ok=True)
+        (content_dir / "sample_content_list.json").write_text(
+            '[{"type": "text", "text": "hello", "page_idx": 0}]',
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr(msf, "do_parse", fake_do_parse)
+
+    content_list, output_dir_path, txt_payload = msf.parse_doc(
+        [fake_pdf], tmp_path, backend="hybrid-auto-engine"
+    )
+
+    assert content_list == [{"type": "text", "text": "hello", "page_idx": 0}]
+    assert output_dir_path == str(tmp_path / "sample" / "hybrid_auto")
+    assert txt_payload is None
 
 
 def _build_payload(tmp_path: Path, filename: str = "doc.pdf") -> dict:

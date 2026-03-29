@@ -23,7 +23,7 @@ dependencies = [
     "toml",
     "openai",
     "google-genai",
-    "mineru[all]",
+    "mineru[all]>=3.0.1,<4",
     "python-docx",
     "pillow",
     "loguru",

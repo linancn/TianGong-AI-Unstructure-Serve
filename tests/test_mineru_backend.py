@@ -29,10 +29,10 @@ def test_normalize_backend_rejects_invalid():
     assert "Unsupported MinerU backend" in str(excinfo.value)
 
 
-def test_resolve_backend_maps_hybrid_to_vlm():
-    for hybrid, target in BACKEND_FALLBACKS.items():
-        normalized = normalize_backend(hybrid)
-        assert resolve_backend(normalized) == target
+def test_resolve_backend_keeps_hybrid_values():
+    assert BACKEND_FALLBACKS == {}
+    assert resolve_backend("hybrid-http-client") == "hybrid-http-client"
+    assert resolve_backend("hybrid-auto-engine") == "hybrid-auto-engine"
 
 
 def test_resolve_backend_passthrough():
@@ -42,7 +42,7 @@ def test_resolve_backend_passthrough():
 
 def test_resolve_backend_from_env(monkeypatch):
     monkeypatch.setenv("MINERU_DEFAULT_BACKEND", "hybrid-http-client")
-    assert resolve_backend_from_env() == "vlm-http-client"
+    assert resolve_backend_from_env() == "hybrid-http-client"
 
     monkeypatch.setenv("MINERU_DEFAULT_BACKEND", "vlm-transformers")
     assert resolve_backend_from_env() == "vlm-transformers"
