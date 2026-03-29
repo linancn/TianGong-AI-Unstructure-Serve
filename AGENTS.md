@@ -12,7 +12,7 @@
 - `src/services/`：服务层实现。包含 MinerU 解析全流程（含图片/科研版）、Markdown 生成、MinIO 封装、视觉模型调用及 GPU 调度；其中 `mineru_service_full.py` 已改为对官方 `mineru.cli.common.do_parse` 的薄兼容层，调用完成后回读 `{stem}_content_list.json`，继续向下游暴露原有 `(content_list, output_dir, None)` 契约；`celery_app.py` 提供 Celery 单例配置，`tasks/mineru_tasks.py`/`mineru_task_runner.py` 负责 MinerU 异步任务执行。
 - `src/utils/`：工具函数，例如统一 JSON 响应包装、Markdown 预处理、Office→PDF 转换、MinerU 支持文件扩展名查询、纯文本导出等。
 - `src/models/`：Pydantic 数据模型，描述 API 的入参与返回结构（如 `ResponseWithPageNum`（含可选 `txt`/`minio_assets` 字段）等）。
-- 根目录还包含 `README.md`（环境配置与运维命令）、多个 `ecosystem*.json`（pm2 启动模板）以及 `pyproject.toml`/`uv.lock`（依赖声明）。
+- 根目录还包含 `README.md`（环境配置与运维命令）、多个 `ecosystem*.json`（pm2 启动模板）以及 `pyproject.toml`/`uv.lock`（依赖声明）。`mineru_3_docx_native_evaluation.md` 记录了 2026-03-29 对 MinerU 3.x 原生 DOCX 拆解的专项评估：当前结论是正文抽取效果更好，但无法等价覆盖现有 `page_number`、`chunk_type`、MinIO PDF 资产和视觉链路语义，因此暂不切换默认 Office 路径。
 
 ## 核心功能
 - **MinerU 文档解析**（`src/routers/mineru_router.py` 等）  
@@ -20,6 +20,7 @@
   - 可选通过 `return_txt` 返回纯文本串（标题段落追加 `\n\n`、普通段落 `\n`）及内容类型标签，结果统一映射到 `TextElementWithPageNum` 模型。
   - MinerU 后端由环境变量 `MINERU_DEFAULT_BACKEND` 控制；允许值：`pipeline`/`vlm-transformers`/`vlm-vllm-engine`/`vlm-lmdeploy-engine`/`vlm-http-client`/`vlm-mlx-engine`，接受 `hybrid-auto-engine`/`hybrid-http-client`。在当前 MinerU 3.x 适配层中，`hybrid-*` 会直接透传给官方 `do_parse`，不再回退到 `vlm-*`。API 不再接受表单参数覆盖后端。校验与规范化逻辑见 `src/utils/mineru_backend.py`。  
   - `src/services/mineru_service_full.py` 不再直接 import MinerU 内部的 pipeline/vlm/hybrid 私有实现，而是统一调用官方 `mineru.cli.common.do_parse`，并从输出目录回读 `{stem}_content_list.json`；这样可以兼容 MinerU 3.x 同时保持 `gpu_scheduler`、`/mineru_with_images`、`/two_stage/*` 现有下游处理逻辑不变。非 DOCX Office 仍由 API 层先用 LibreOffice 转成 PDF，不依赖 MinerU 3.x 原生 Office 路径。  
+  - MinerU 3.x 原生 DOCX 路线已做过专项评估，样本与 synthetic case 说明见 `mineru_3_docx_native_evaluation.md`。当前判断是：原生 DOCX 更适合正文抽取，但不能稳定覆盖现有 `page_number`、`chunk_type.title/list`、`save_to_minio` 与逐页 JPEG 语义，因此默认 Office 路径继续保留 `Office -> PDF -> vllm`。
   - 当调用端传入 `chunk_type=true` 时，解析结果除了保留标题（`type="title"`）外，还会额外返回页眉与页脚片段（`type="header"`/`"footer"`），图像识别块标记为 `type="image"`，并将页眉放在结果列表顶部；`page_number` 类型仍被忽略，且 `return_txt=true` 时的纯文本输出会按同样顺序拼接。
   - `/mineru` 与 `/mineru_with_images` 均支持 `save_to_minio` 与 `minio_*` 表单字段，成功时会在 `mineru/<文件名>`（可自定义 `minio_prefix`）下写入源 PDF、解析 JSON 与逐页 JPEG，并通过响应体的 `minio_assets` 摘要返回上传结果；当 `chunk_type=true` 时，写入 MinIO 的 `parsed.json` 会保留 `type` 字段（header/footer/title/image）以便下游消费。两者唯一差异是 `/mineru_with_images` 会额外调用视觉大模型（`pipeline="images"`）为图像生成描述。
   - 额外可选字段 `minio_meta` 会在 `save_to_minio=true` 时把传入字符串写入 `meta.txt`（与 `source.pdf` 同目录），返回的 `minio_assets.meta_object` 会指向该文件，便于下游查阅附加元信息；若 `save_to_minio=false`，后端会安全地忽略该字段，避免调用端因默认值冲突而报错。
