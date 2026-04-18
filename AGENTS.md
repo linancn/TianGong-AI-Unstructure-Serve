@@ -12,7 +12,7 @@
 - `src/services/`：服务层实现。包含 MinerU 解析全流程（含图片/科研版）、Markdown 生成、MinIO 封装、视觉模型调用及 GPU 调度；其中 `mineru_service_full.py` 已改为对官方 `mineru.cli.common.do_parse` 的薄兼容层，调用完成后回读 `{stem}_content_list.json`，继续向下游暴露原有 `(content_list, output_dir, None)` 契约；`celery_app.py` 提供 Celery 单例配置，`tasks/mineru_tasks.py`/`mineru_task_runner.py` 负责 MinerU 异步任务执行。
 - `src/utils/`：工具函数，例如统一 JSON 响应包装、Markdown 预处理、Office→PDF 转换、MinerU 支持文件扩展名查询、纯文本导出等。
 - `src/models/`：Pydantic 数据模型，描述 API 的入参与返回结构（如 `ResponseWithPageNum`（含可选 `txt`/`minio_assets` 字段）等）。
-- 根目录还包含 `README.md`（环境配置与运维命令）、多个 `ecosystem*.json`（pm2 启动模板）以及 `pyproject.toml`/`uv.lock`（依赖声明）。`mineru_3_docx_native_evaluation.md` 记录了 2026-03-29 对 MinerU 3.x 原生 DOCX 拆解的专项评估：当前结论是正文抽取效果更好，但无法等价覆盖现有 `page_number`、`chunk_type`、MinIO PDF 资产和视觉链路语义，因此暂不切换默认 Office 路径。
+- 根目录还包含 `README.md`（环境配置与运维命令，已按当前 MinerU 3.x 口径同步 `hybrid-*` backend 直传官方 `do_parse` 的行为）、多个 `ecosystem*.json`（pm2 启动模板）以及 `pyproject.toml`/`uv.lock`（依赖声明）。`mineru_3_docx_native_evaluation.md` 记录了 2026-03-29 对 MinerU 3.x 原生 DOCX 拆解的专项评估：当前结论是正文抽取效果更好，但无法等价覆盖现有 `page_number`、`chunk_type`、MinIO PDF 资产和视觉链路语义，因此暂不切换默认 Office 路径。另新增 `multi_gpu_vllm_scaling_todolist.md`，用于记录“多卡下优先采用 `vlm-http-client + 每卡单独 server + 主服务编排`、`vlm-vllm-async-engine` 仅作为可选快车道”的详细实施待办。
 
 ## 核心功能
 - **MinerU 文档解析**（`src/routers/mineru_router.py` 等）  
