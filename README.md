@@ -12,8 +12,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # ensure CPython 3.12 is available locally
 uv python install 3.12
 
-# install all project dependencies into .venv/
+# install or upgrade all project dependencies into .venv/
 uv sync
+uv sync --upgrade
 ```
 
 `uv sync` reads `pyproject.toml` (and `uv.lock` when present) to create a virtual environment at `.venv/`.  
