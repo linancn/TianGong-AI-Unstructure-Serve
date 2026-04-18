@@ -181,6 +181,15 @@ def _normalize_provider(value: Optional[Union[VisionProvider, str]]) -> Optional
     return None
 
 
+def _provider_value(value: Optional[Union[VisionProvider, str]]) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, VisionProvider):
+        return value.value
+    candidate = value.strip().lower()
+    return candidate or None
+
+
 def _resolve_provider(explicit: Optional[VisionProvider]) -> VisionProvider:
     if explicit:
         return explicit
@@ -228,6 +237,40 @@ def _provider_from_model(model: Optional[Union[VisionModel, str]]) -> Optional[V
     return MODEL_PROVIDER_LOOKUP.get(model_value)
 
 
+def _normalize_request_overrides(
+    provider: Optional[Union[VisionProvider, str]],
+    model: Optional[Union[VisionModel, str]],
+) -> Tuple[Optional[VisionProvider], Optional[str]]:
+    raw_provider = _provider_value(provider)
+    explicit_provider = _normalize_provider(provider)
+    explicit_model = _model_value(model)
+    model_provider = _provider_from_model(model)
+
+    if raw_provider and explicit_provider is None:
+        logger.warning(
+            "Ignoring unsupported vision provider override '{}' and using configured defaults.",
+            raw_provider,
+        )
+
+    if explicit_model and model_provider is None:
+        logger.warning(
+            "Ignoring unsupported vision model override '{}' and falling back to VISION_PROVIDER/VISION_MODEL.",
+            explicit_model,
+        )
+        return None, None
+
+    if explicit_provider and model_provider and explicit_provider != model_provider:
+        logger.warning(
+            "Ignoring mismatched vision provider/model override provider='{}' model='{}'. Using provider '{}' inferred from the model.",
+            explicit_provider.value,
+            explicit_model,
+            model_provider.value,
+        )
+        return model_provider, explicit_model
+
+    return explicit_provider or model_provider, explicit_model
+
+
 def vision_completion(
     image_path: str,
     context: str = "",
@@ -235,13 +278,9 @@ def vision_completion(
     provider: Optional[Union[VisionProvider, str]] = None,
     model: Optional[Union[VisionModel, str]] = None,
 ) -> str:
-    explicit_provider = _normalize_provider(provider)
-    model_provider = _provider_from_model(model)
-    if explicit_provider and model_provider and explicit_provider != model_provider:
-        raise ValueError("Provided model does not match the requested provider.")
-
-    chosen = _resolve_provider(explicit_provider or model_provider)
-    resolved_model = _resolve_model(chosen, model)
+    requested_provider, requested_model = _normalize_request_overrides(provider, model)
+    chosen = _resolve_provider(requested_provider)
+    resolved_model = _resolve_model(chosen, requested_model)
     chosen_spec = PROVIDER_SPECS[chosen.value]
 
     result: Optional[str] = None

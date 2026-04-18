@@ -22,12 +22,7 @@ from src.models.models import (
 )
 from src.services.celery_app import celery_app
 from src.services.tasks.mineru_tasks import run_mineru_with_images_task
-from src.services.vision_service import (
-    AVAILABLE_MODEL_VALUES,
-    AVAILABLE_PROVIDER_VALUES,
-    VisionModel,
-    VisionProvider,
-)
+from src.services.vision_service import AVAILABLE_MODEL_VALUES, AVAILABLE_PROVIDER_VALUES
 from src.utils.file_conversion import (
     CONVERTIBLE_OFFICE_EXTENSIONS,
     MARKDOWN_EXTENSIONS,
@@ -63,16 +58,11 @@ def _form_provider(
         description="Vision model provider to use.",
         json_schema_extra={"enum": AVAILABLE_PROVIDER_VALUES},
     )
-) -> Optional[VisionProvider]:
-    if provider is None or provider.strip() == "":
+) -> Optional[str]:
+    if provider is None:
         return None
-    try:
-        return VisionProvider(provider.strip())
-    except ValueError:
-        allowed = ", ".join(p.value for p in VisionProvider)
-        raise HTTPException(
-            status_code=422, detail=f"Invalid provider '{provider}'. Allowed: {allowed}."
-        )
+    stripped = provider.strip()
+    return stripped or None
 
 
 def _form_model(
@@ -81,14 +71,11 @@ def _form_model(
         description="Vision model identifier to use.",
         json_schema_extra={"enum": AVAILABLE_MODEL_VALUES},
     )
-) -> Optional[VisionModel]:
-    if model is None or model.strip() == "":
+) -> Optional[str]:
+    if model is None:
         return None
-    try:
-        return VisionModel(model.strip())
-    except ValueError:
-        allowed = ", ".join(m.value for m in VisionModel)
-        raise HTTPException(status_code=422, detail=f"Invalid model '{model}'. Allowed: {allowed}.")
+    stripped = model.strip()
+    return stripped or None
 
 
 @router.post(
@@ -103,8 +90,8 @@ def _form_model(
 )
 async def mineru_with_images_task(
     file: UploadFile = File(...),
-    provider: Optional[VisionProvider] = Depends(_form_provider),
-    model: Optional[VisionModel] = Depends(_form_model),
+    provider: Optional[str] = Depends(_form_provider),
+    model: Optional[str] = Depends(_form_model),
     prompt: Optional[str] = Form(
         None,
         description="Optional instruction prompt override passed to the vision model.",
@@ -203,8 +190,8 @@ async def mineru_with_images_task(
                     "minio_prefix": minio_prefix,
                     "minio_meta": minio_meta if save_to_minio else None,
                     "backend_value": backend_value,
-                    "vision_provider": provider.value if provider else None,
-                    "vision_model": model.value if model else None,
+                    "vision_provider": provider,
+                    "vision_model": model,
                     "vision_prompt": prompt_value,
                 }
             ],

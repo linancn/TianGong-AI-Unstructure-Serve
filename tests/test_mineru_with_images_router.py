@@ -60,3 +60,39 @@ def test_mineru_with_images_docx_return_txt_uses_native_docx_payload_txt(
     assert str(captured["file_path"]).endswith(".pdf")
     assert captured["kwargs"]["txt_from_native_docx"] is True
     assert str(captured["kwargs"]["txt_source_path"]).endswith(".docx")
+
+
+def test_mineru_with_images_invalid_model_no_longer_returns_422(client, monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_submit(file_path: str, pipeline: str = "default", **kwargs):
+        captured["file_path"] = file_path
+        captured["pipeline"] = pipeline
+        captured["kwargs"] = kwargs
+        future = concurrent.futures.Future()
+        future.set_result(
+            {
+                "result": [
+                    {
+                        "text": "body",
+                        "page_number": 1,
+                    }
+                ]
+            }
+        )
+        return future
+
+    monkeypatch.setattr(router, "resolve_backend_from_env", lambda: "vlm-http-client")
+    monkeypatch.setattr(router.scheduler, "submit", fake_submit)
+
+    response = client.post(
+        "/mineru_with_images",
+        files={"file": ("sample.pdf", b"%PDF-1.4\n", "application/pdf")},
+        data={"provider": "missing-provider", "model": "missing-model"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"result": [{"text": "body", "page_number": 1}]}
+    assert captured["pipeline"] == "images"
+    assert captured["kwargs"]["vision_provider"] == "missing-provider"
+    assert captured["kwargs"]["vision_model"] == "missing-model"
