@@ -7,13 +7,10 @@ from src.models.models import ResponseWithPageNum, TextElementWithPageNum
 from src.services.gpu_scheduler import scheduler
 from src.utils.file_conversion import (
     CONVERTIBLE_OFFICE_EXTENSIONS,
-    MARKDOWN_EXTENSIONS,
     format_extension_list,
     maybe_convert_to_pdf,
 )
-from src.utils.markdown_parser import parse_markdown_chunks
 from src.utils.mineru_support import (
-    format_supported_extensions,
     mineru_supported_extensions,
 )
 from src.utils.response_utils import json_response, pretty_response_flag
@@ -22,10 +19,8 @@ from src.utils.text_output import build_plain_text
 router = APIRouter()
 
 SUPPORTED_EXTENSIONS = mineru_supported_extensions()
-SUPPORTED_EXTENSIONS_STR = format_supported_extensions()
 OFFICE_EXTENSIONS_STR = format_extension_list(CONVERTIBLE_OFFICE_EXTENSIONS)
-MARKDOWN_EXTENSIONS_STR = format_extension_list(MARKDOWN_EXTENSIONS)
-ACCEPTED_EXTENSIONS = SUPPORTED_EXTENSIONS | CONVERTIBLE_OFFICE_EXTENSIONS | MARKDOWN_EXTENSIONS
+ACCEPTED_EXTENSIONS = SUPPORTED_EXTENSIONS | CONVERTIBLE_OFFICE_EXTENSIONS
 ACCEPTED_EXTENSIONS_STR = format_extension_list(ACCEPTED_EXTENSIONS)
 PARSE_TIMEOUT = int(os.getenv("MINERU_SCI_TIMEOUT_SECONDS", "110"))
 
@@ -37,8 +32,7 @@ PARSE_TIMEOUT = int(os.getenv("MINERU_SCI_TIMEOUT_SECONDS", "110"))
     response_description="List of text chunks with page numbers",
     description=(
         f"Supported file types: {ACCEPTED_EXTENSIONS_STR}.\n"
-        f"Office formats ({OFFICE_EXTENSIONS_STR}) auto-convert to PDF before parsing.\n"
-        f"Markdown ({MARKDOWN_EXTENSIONS_STR}) is parsed directly via regex-based chunking."
+        f"Office formats ({OFFICE_EXTENSIONS_STR}) auto-convert to PDF before parsing."
     ),
 )
 async def mineru(
@@ -53,7 +47,6 @@ async def mineru(
 
     Accepted: {ACCEPTED_EXTENSIONS_STR}
     Office formats ({OFFICE_EXTENSIONS_STR}) auto-convert to PDF before parsing.
-    Markdown ({MARKDOWN_EXTENSIONS_STR}) is parsed directly via regex-based chunking.
     Output: [(text, page_number), ...]
     """
     filename = file.filename or ""
@@ -74,13 +67,6 @@ async def mineru(
         )
 
     file_bytes = await file.read()
-
-    if file_ext in MARKDOWN_EXTENSIONS:
-        text_content = file_bytes.decode("utf-8", errors="ignore")
-        items = parse_markdown_chunks(text_content, chunk_type=chunk_type)
-        txt_text = build_plain_text(items) if return_txt else None
-        response_model = ResponseWithPageNum(result=items, txt=txt_text)
-        return json_response(response_model, pretty)
 
     # Use a persistent temp file so it survives queueing; we'll clean it up after processing
     tmp = tempfile.NamedTemporaryFile(suffix=file_ext, delete=False)

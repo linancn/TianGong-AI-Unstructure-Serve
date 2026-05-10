@@ -39,8 +39,8 @@ def test_mineru_supported_extensions_collects_from_module(monkeypatch):
     mineru_cli_pkg = types.ModuleType("mineru.cli")
     mineru_cli_pkg.__path__ = []
     mineru_common = types.ModuleType("mineru.cli.common")
-    mineru_common.FILE_SUFFIXES = {".pdf", ".docx"}
-    mineru_common.extra_extensions = ["png", ".jpg"]
+    mineru_common.FILE_SUFFIXES = {".pdf", ".docx", ".md", ".txt"}
+    mineru_common.extra_extensions = ["png", ".jpg", ".markdown"]
 
     monkeypatch.setitem(sys.modules, "mineru", mineru_pkg)
     monkeypatch.setitem(sys.modules, "mineru.cli", mineru_cli_pkg)

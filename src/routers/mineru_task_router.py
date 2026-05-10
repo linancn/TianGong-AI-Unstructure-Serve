@@ -20,7 +20,6 @@ from src.services.celery_app import celery_app
 from src.services.tasks.mineru_tasks import run_mineru_task
 from src.utils.file_conversion import (
     CONVERTIBLE_OFFICE_EXTENSIONS,
-    MARKDOWN_EXTENSIONS,
     format_extension_list,
 )
 from src.utils.mineru_backend import resolve_backend_from_env
@@ -31,7 +30,7 @@ from src.config.config import CELERY_TASK_MINERU_QUEUE, CELERY_TASK_URGENT_QUEUE
 router = APIRouter()
 
 SUPPORTED_EXTENSIONS = mineru_supported_extensions()
-ACCEPTED_EXTENSIONS = SUPPORTED_EXTENSIONS | CONVERTIBLE_OFFICE_EXTENSIONS | MARKDOWN_EXTENSIONS
+ACCEPTED_EXTENSIONS = SUPPORTED_EXTENSIONS | CONVERTIBLE_OFFICE_EXTENSIONS
 ACCEPTED_EXTENSIONS_STR = format_extension_list(ACCEPTED_EXTENSIONS)
 
 
@@ -100,12 +99,6 @@ async def mineru_task(
             status_code=400,
             detail=f"Unsupported file type. Allowed types: {ACCEPTED_EXTENSIONS_STR}",
         )
-    if save_to_minio and file_ext in MARKDOWN_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail="MinIO storage is not supported for Markdown uploads.",
-        )
-
     try:
         backend_value = resolve_backend_from_env()
     except ValueError as exc:

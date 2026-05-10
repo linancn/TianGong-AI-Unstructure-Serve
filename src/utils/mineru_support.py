@@ -4,6 +4,7 @@ from functools import lru_cache
 from typing import Iterable, Set
 
 _DEFAULT_EXTENSIONS: Set[str] = {".pdf", ".png", ".jpeg", ".jpg"}
+_PLAIN_TEXT_EXTENSIONS: Set[str] = {".md", ".markdown", ".txt", ".text"}
 
 
 def _normalize_extension(value: str) -> str:
@@ -60,7 +61,7 @@ def mineru_supported_extensions() -> Set[str]:
         for fallback_name in ("READ_FN_MAPPING", "SUFFIX_FN_MAPPING", "suffix_to_read_fn"):
             collected |= _collect_from_value(getattr(mineru_common, fallback_name, None))
 
-    return collected or set(_DEFAULT_EXTENSIONS)
+    return (collected or set(_DEFAULT_EXTENSIONS)) - _PLAIN_TEXT_EXTENSIONS
 
 
 def format_supported_extensions() -> str:

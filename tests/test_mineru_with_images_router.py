@@ -6,6 +6,26 @@ from pathlib import Path
 from src.routers import mineru_with_images_router as router
 
 
+def test_mineru_with_images_rejects_markdown(client, monkeypatch):
+    called = False
+
+    def fake_submit(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("scheduler should not be called for Markdown uploads")
+
+    monkeypatch.setattr(router.scheduler, "submit", fake_submit)
+
+    response = client.post(
+        "/mineru_with_images",
+        files={"file": ("sample.md", b"# Title\n\nBody", "text/markdown")},
+    )
+
+    assert response.status_code == 400
+    assert "Unsupported file type" in response.json()["detail"]
+    assert called is False
+
+
 def test_mineru_with_images_docx_return_txt_uses_native_docx_payload_txt(
     client, monkeypatch, tmp_path
 ):

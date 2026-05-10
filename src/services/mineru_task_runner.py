@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 from typing import Optional
 
 from loguru import logger
@@ -15,17 +14,15 @@ from src.routers.mineru_minio_utils import (
 from src.services.gpu_scheduler import scheduler
 from src.utils.file_conversion import (
     CONVERTIBLE_OFFICE_EXTENSIONS,
-    MARKDOWN_EXTENSIONS,
     format_extension_list,
     maybe_convert_to_pdf,
 )
-from src.utils.markdown_parser import parse_markdown_chunks
 from src.utils.mineru_backend import resolve_backend_from_env
 from src.utils.mineru_support import mineru_supported_extensions
 from src.utils.text_output import build_plain_text
 
 SUPPORTED_EXTENSIONS = mineru_supported_extensions()
-ACCEPTED_EXTENSIONS = SUPPORTED_EXTENSIONS | CONVERTIBLE_OFFICE_EXTENSIONS | MARKDOWN_EXTENSIONS
+ACCEPTED_EXTENSIONS = SUPPORTED_EXTENSIONS | CONVERTIBLE_OFFICE_EXTENSIONS
 
 
 class MineruTaskError(Exception):
@@ -46,17 +43,6 @@ def _validate_extension(file_ext: str) -> None:
         raise MineruTaskError(
             f"Unsupported file type. Allowed types: {format_extension_list(ACCEPTED_EXTENSIONS)}"
         )
-
-
-def _prepare_markdown_payload(file_path: Path, chunk_type: bool, return_txt: bool) -> dict:
-    text_content = file_path.read_text("utf-8", errors="ignore")
-    items = parse_markdown_chunks(text_content, chunk_type=chunk_type)
-    txt_text = build_plain_text(items) if return_txt else None
-    return {
-        "result": [item.model_dump() for item in items],
-        "txt": txt_text,
-        "minio_assets": None,
-    }
 
 
 def _parse_with_scheduler(
@@ -170,9 +156,6 @@ def run_mineru_local_job(
 
     _validate_extension(file_ext)
 
-    if save_to_minio and file_ext in MARKDOWN_EXTENSIONS:
-        raise MineruTaskError("MinIO storage is not supported for Markdown uploads.")
-
     backend = backend_value or resolve_backend_from_env()
     cleanup_paths: set[str] = {source_path}
     minio_context: Optional[MinioContext] = None
@@ -189,10 +172,6 @@ def run_mineru_local_job(
             scheduler_options["vision_prompt"] = vision_prompt
 
     try:
-        if file_ext in MARKDOWN_EXTENSIONS:
-            result_payload = _prepare_markdown_payload(Path(source_path), chunk_type, return_txt)
-            return result_payload
-
         if file_ext in CONVERTIBLE_OFFICE_EXTENSIONS:
             processing_path, conversion_cleanup = maybe_convert_to_pdf(source_path, file_ext)
             cleanup_paths.update(conversion_cleanup)

@@ -16,14 +16,11 @@ from src.routers.mineru_minio_utils import (
 )
 from src.utils.file_conversion import (
     CONVERTIBLE_OFFICE_EXTENSIONS,
-    MARKDOWN_EXTENSIONS,
     format_extension_list,
     maybe_convert_to_pdf,
 )
-from src.utils.markdown_parser import parse_markdown_chunks
 from src.utils.mineru_backend import resolve_backend_from_env
 from src.utils.mineru_support import (
-    format_supported_extensions,
     mineru_supported_extensions,
 )
 from src.utils.response_utils import json_response, pretty_response_flag
@@ -32,10 +29,8 @@ from src.utils.text_output import build_plain_text
 router = APIRouter()
 
 SUPPORTED_EXTENSIONS = mineru_supported_extensions()
-SUPPORTED_EXTENSIONS_STR = format_supported_extensions()
 OFFICE_EXTENSIONS_STR = format_extension_list(CONVERTIBLE_OFFICE_EXTENSIONS)
-MARKDOWN_EXTENSIONS_STR = format_extension_list(MARKDOWN_EXTENSIONS)
-ACCEPTED_EXTENSIONS = SUPPORTED_EXTENSIONS | CONVERTIBLE_OFFICE_EXTENSIONS | MARKDOWN_EXTENSIONS
+ACCEPTED_EXTENSIONS = SUPPORTED_EXTENSIONS | CONVERTIBLE_OFFICE_EXTENSIONS
 ACCEPTED_EXTENSIONS_STR = format_extension_list(ACCEPTED_EXTENSIONS)
 
 
@@ -72,8 +67,7 @@ def _form_model(
     response_description="List of text chunks with page numbers",
     description=(
         f"Supported file types: {ACCEPTED_EXTENSIONS_STR}.\n"
-        f"Office formats ({OFFICE_EXTENSIONS_STR}) auto-convert to PDF before parsing.\n"
-        f"Markdown ({MARKDOWN_EXTENSIONS_STR}) is parsed directly via regex-based chunking."
+        f"Office formats ({OFFICE_EXTENSIONS_STR}) auto-convert to PDF before parsing."
     ),
 )
 async def mineru_with_images(
@@ -111,7 +105,6 @@ async def mineru_with_images(
 
     Accepted: {ACCEPTED_EXTENSIONS_STR}
     Office formats ({OFFICE_EXTENSIONS_STR}) auto-convert to PDF before parsing.
-    Markdown ({MARKDOWN_EXTENSIONS_STR}) is parsed directly via regex-based chunking.
     Optional: set save_to_minio=true with credentials to upload the PDF, parsed JSON, and page images.
     Output: [(text, page_number), ...]
     """
@@ -144,20 +137,7 @@ async def mineru_with_images(
         # Ignore meta payloads when MinIO persistence is disabled.
         minio_meta = None
 
-    if save_to_minio and file_ext in MARKDOWN_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail="MinIO storage is not supported for Markdown uploads.",
-        )
-
     file_bytes = await file.read()
-
-    if file_ext in MARKDOWN_EXTENSIONS:
-        text_content = file_bytes.decode("utf-8", errors="ignore")
-        items = parse_markdown_chunks(text_content, chunk_type=chunk_type)
-        txt_text = build_plain_text(items) if return_txt else None
-        response_model = ResponseWithPageNum(result=items, txt=txt_text)
-        return json_response(response_model, pretty)
 
     # Use a persistent temp file so it survives queueing; we'll clean it up after processing
     tmp = tempfile.NamedTemporaryFile(suffix=file_ext, delete=False)
