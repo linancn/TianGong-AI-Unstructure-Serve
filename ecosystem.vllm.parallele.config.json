@@ -4,7 +4,7 @@
       "name": "mineru-vllm-server",
       "cwd": ".",
       "script": ".venv/bin/mineru-vllm-server",
-      "args": "--port 30000 --data-parallel-size 3",
+      "args": "--port 30000 --data-parallel-size 3 --gpu-memory-utilization 0.22",
       "exec_mode": "fork",
       "interpreter": "none",
       "env": {
