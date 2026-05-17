@@ -7,6 +7,11 @@
       "args": "--port 30000 --data-parallel-size 3 --gpu-memory-utilization 0.22",
       "exec_mode": "fork",
       "interpreter": "none",
+      "autorestart": true,
+      "max_restarts": 5,
+      "min_uptime": "60s",
+      "exp_backoff_restart_delay": 10000,
+      "kill_timeout": 30000,
       "env": {
         "MINERU_MODEL_SOURCE": "modelscope",
         "CUDA_VISIBLE_DEVICES": "0,1,2"
