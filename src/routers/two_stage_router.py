@@ -1,5 +1,6 @@
 """Two-stage MinerU+vision API router (不改现有路由，独立挂载）。"""
 
+import json
 import os
 import shutil
 import uuid
@@ -42,6 +43,31 @@ ACCEPTED_EXTENSIONS_STR = format_extension_list(ACCEPTED_EXTENSIONS)
 class TaskPriority(str, Enum):
     NORMAL = "normal"
     URGENT = "urgent"
+
+
+def _two_stage_queue_names() -> list[str]:
+    normal_queues = resolve_two_stage_queues(TaskPriority.NORMAL.value)
+    urgent_queues = resolve_two_stage_queues(TaskPriority.URGENT.value)
+    ordered_names = dict.fromkeys([*normal_queues.values(), *urgent_queues.values()])
+    return [name for name in ordered_names if name]
+
+
+def _extract_unacked_queue_name(raw_entry: bytes | str) -> Optional[str]:
+    if isinstance(raw_entry, bytes):
+        raw_entry = raw_entry.decode("utf-8")
+
+    try:
+        payload = json.loads(raw_entry)
+    except (TypeError, ValueError):
+        return None
+
+    if not isinstance(payload, list) or len(payload) < 3:
+        return None
+
+    queue_name = payload[2]
+    if isinstance(queue_name, str) and queue_name:
+        return queue_name
+    return None
 
 
 def _normalize_filename(filename: str, fallback_ext: str) -> str:
@@ -209,3 +235,48 @@ def two_stage_task_status(task_id: str):
         return {"task_id": task_id, "state": state, "error": error_detail}
 
     return {"task_id": task_id, "state": state}
+
+
+@router.get(
+    "/two_stage/queue_status",
+    summary="Fetch two-stage Celery queue backlog",
+)
+def two_stage_queue_status():
+    broker_url = celery_app.conf.broker_url
+    if isinstance(broker_url, (list, tuple)):
+        broker_url = broker_url[0] if broker_url else ""
+    broker_url = str(broker_url or "").strip()
+
+    if not broker_url.startswith(("redis://", "rediss://")):
+        raise HTTPException(
+            status_code=503,
+            detail="Queue status is only available when Celery uses a Redis broker.",
+        )
+
+    try:
+        import redis
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Redis client is unavailable for queue status: {exc}",
+        ) from exc
+
+    queue_names = _two_stage_queue_names()
+    try:
+        redis_client = redis.Redis.from_url(broker_url)
+        queue_lengths = {
+            queue_name: int(redis_client.llen(queue_name)) for queue_name in queue_names
+        }
+        unacked_counts = {queue_name: 0 for queue_name in queue_names}
+
+        for raw_entry in redis_client.hvals("unacked"):
+            queue_name = _extract_unacked_queue_name(raw_entry)
+            if queue_name in unacked_counts:
+                unacked_counts[queue_name] += 1
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to query Redis queue status: {exc}",
+        ) from exc
+
+    return {"broker": "redis", "queues": queue_lengths, "unacked": unacked_counts}
