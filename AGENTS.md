@@ -90,6 +90,7 @@
 
 ## 环境准备与运行
 - 推荐使用 [uv](https://docs.astral.sh/uv/) 管理 Python 3.12 及依赖：`uv python install 3.12` → `uv sync`。
+- `pyproject.toml` 显式约束 `fastapi==0.136.3` 与 `starlette<0.52`：当前 `vllm 0.11.0` 依赖的 `prometheus-fastapi-instrumentator 7.1.0` 与 FastAPI 0.138/0.139、Starlette 0.52 路由对象不兼容，会导致 `mineru-vllm-server` 请求入口报 `_IncludedRouter` 缺少 `path` 并返回 500；后续只有在 vLLM/instrumentator 依赖链确认兼容后再移除该约束。
 - 系统依赖需通过 `apt` 安装：`libmagic-dev`、`poppler-utils`、`libreoffice`、`pandoc`、`graphicsmagick` 等，以支持 Office 转 PDF、文档解析及图片处理。
 - 首次运行需下载 MinerU 模型：  
   ```bash
