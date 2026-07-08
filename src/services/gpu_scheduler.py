@@ -1,18 +1,111 @@
-import os
-import re
-import tempfile
+import atexit
+import ctypes
 import multiprocessing
+import os
 import queue
+import re
+import signal
+import tempfile
+import time
 from concurrent.futures import ProcessPoolExecutor, Future
+from contextlib import suppress
 from dataclasses import dataclass
 from threading import Lock
 from typing import Dict, List, Optional
 
 from src.utils.text_output import build_plain_text
 
+_LINUX_PR_SET_PDEATHSIG = 1
+_CHILD_EXIT_GRACE_SECONDS = 5
+_CHILD_TERMINATE_GRACE_SECONDS = 5
+
+
+def _set_parent_death_signal(signum: int = signal.SIGTERM) -> bool:
+    """Ask Linux to signal this process when its parent dies."""
+    if not sys_platform_is_linux():
+        return False
+    try:
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        result = libc.prctl(_LINUX_PR_SET_PDEATHSIG, signum, 0, 0, 0)
+    except OSError:
+        return False
+    return result == 0
+
+
+def sys_platform_is_linux() -> bool:
+    return os.name == "posix" and hasattr(os, "killpg") and os.uname().sysname == "Linux"
+
+
+def _exit_and_signal_child_group(signum: int, _frame: object) -> None:
+    """Terminate all descendants in the isolated parse process group, then exit."""
+    with suppress(Exception):
+        signal.signal(signum, signal.SIG_IGN)
+    with suppress(Exception):
+        os.killpg(os.getpgrp(), signum)
+    time.sleep(0.5)
+    with suppress(Exception):
+        os.killpg(os.getpgrp(), signal.SIGKILL)
+    os._exit(128 + signum)
+
+
+def _configure_parse_child_process() -> None:
+    parent_death_signal_set = _set_parent_death_signal(signal.SIGTERM)
+    if os.name == "posix":
+        with suppress(OSError):
+            os.setsid()
+        signal.signal(signal.SIGTERM, _exit_and_signal_child_group)
+        signal.signal(signal.SIGINT, _exit_and_signal_child_group)
+    if parent_death_signal_set and os.getppid() == 1:
+        _exit_and_signal_child_group(signal.SIGTERM, None)
+
+
+def _signal_process_group(pid: int, signum: int) -> bool:
+    if os.name != "posix":
+        return False
+    try:
+        os.killpg(pid, signum)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return False
+    return True
+
+
+def _cleanup_child_process(
+    proc: multiprocessing.Process,
+    *,
+    terminate: bool,
+) -> None:
+    if terminate:
+        if not _signal_process_group(proc.pid, signal.SIGTERM) and proc.is_alive():
+            proc.terminate()
+        proc.join(timeout=_CHILD_TERMINATE_GRACE_SECONDS)
+    else:
+        proc.join(timeout=_CHILD_EXIT_GRACE_SECONDS)
+
+    if proc.is_alive():
+        if not _signal_process_group(proc.pid, signal.SIGTERM):
+            proc.terminate()
+        proc.join(timeout=_CHILD_TERMINATE_GRACE_SECONDS)
+
+    if proc.is_alive():
+        if not _signal_process_group(proc.pid, signal.SIGKILL):
+            with suppress(AttributeError):
+                proc.kill()
+        proc.join(timeout=_CHILD_TERMINATE_GRACE_SECONDS)
+
+    # The parse child is a process-group leader. After it exits, MinerU helper
+    # processes can still remain in the same group, so sweep the group too.
+    if _signal_process_group(proc.pid, signal.SIGTERM):
+        time.sleep(0.2)
+        _signal_process_group(proc.pid, signal.SIGKILL)
+
 
 def _worker_init(gpu_id: str):
     """Initializer for each worker process to pin visibility to a single GPU."""
+    parent_death_signal_set = _set_parent_death_signal(signal.SIGTERM)
+    if parent_death_signal_set and os.getppid() == 1:
+        os.kill(os.getpid(), signal.SIGTERM)
     # Only expose the target GPU to libraries inside this process
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     # Optional: set Paddle/other OCR backends to GPU if supported. They usually auto-detect.
@@ -143,6 +236,7 @@ def _child_worker(
     q: multiprocessing.Queue, path: str, pipeline: str, options: Optional[Dict[str, object]]
 ) -> None:
     """Wrapper run in a separate process to enforce a hard timeout."""  # pragma: no cover
+    _configure_parse_child_process()
     try:
         data = _actual_parse(path, pipeline, options)
         q.put({"ok": True, "data": data})
@@ -187,9 +281,7 @@ def _worker_process_file(
             msg = result_queue.get(timeout=hard_timeout)
         except queue.Empty:
             # Timeout -> kill child
-            if proc.is_alive():
-                proc.terminate()
-                proc.join(timeout=5)
+            _cleanup_child_process(proc, terminate=True)
             raise TimeoutError(f"Parse hard timeout after {hard_timeout}s (pipeline={pipeline})")
 
         if not msg.get("ok"):
@@ -199,8 +291,9 @@ def _worker_process_file(
             payload = {"result": payload}
         return payload
     finally:
-        if proc.is_alive():  # ensure cleanup
-            proc.join(timeout=1)
+        _cleanup_child_process(proc, terminate=False)
+        result_queue.close()
+        result_queue.join_thread()
 
 
 @dataclass
@@ -238,10 +331,13 @@ class GPUScheduler:
             )
 
         self._lock = Lock()
+        self._closed = False
 
     def _pick_executor(self) -> _GPUExecutor:
         """Pick the GPU with the smallest pending queue."""
         with self._lock:
+            if self._closed:
+                raise RuntimeError("GPU scheduler is shut down")
             exec_ = min(self._executors, key=lambda e: e.pending)
             exec_.pending += 1
             return exec_
@@ -269,6 +365,17 @@ class GPUScheduler:
             total_pending = sum(e.pending for e in self._executors)
         return {"gpus": gpus, "total_pending": total_pending}
 
+    def shutdown(self, wait: bool = False) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            executors = list(self._executors)
+
+        for exec_ in executors:
+            exec_.pool.shutdown(wait=wait, cancel_futures=True)
+
 
 # Singleton scheduler
 scheduler = GPUScheduler()
+atexit.register(scheduler.shutdown)

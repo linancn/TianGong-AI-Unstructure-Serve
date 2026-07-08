@@ -41,6 +41,7 @@
   - 允许上传 Markdown 文本和可选的 reference DOCX 模板，将内容转换为 DOCX 并按需清理文档样式（依赖 Pandoc 与 python-docx）。
 - **GPU 调度与监控**（`src/services/gpu_scheduler.py`）  
   - 按 GPU ID 创建 `ProcessPoolExecutor`，每个任务在独立子进程执行，并设有硬超时以防解析卡死。  
+  - 解析子进程会在 Linux 下设置 parent-death signal，并把每个 MinerU 任务放入独立进程组；只有任务超过 MinerU hard timeout、父进程退出或结果已返回后的收尾阶段才会清理该任务进程组，避免按运行时长误杀大文件解析。`src.main` 的 shutdown 钩子会先调用 `scheduler.shutdown(wait=True)`，让正常 PM2/Gunicorn 重启尽量等待解析任务按自身超时收敛。
   - `/gpu/status` 路由可以查询每块 GPU 的排队任务数及运行情况。
 - **视觉问答/解析**（`src/services/vision_service.py`）  
   - 统一调度 OpenAI、Gemini、vLLM 视觉大模型；当前默认部署配置（`.env` / `.env.example` / `ecosystem.config.json` / `ecosystem.quatro.json`）已收口到 vLLM：`VISION_PROVIDER_CHOICES=vllm`、`VISION_PROVIDER=vllm`，现有调用默认不会再回退到 OpenAI / Gemini。OpenAI 与 vLLM 通过 `vision_service_openai_compatible.py` 共用 OpenAI-compatible 客户端池；vLLM 必须配置 `VLLM_BASE_URLS`/`VLLM_BASE_URL` 才视为可用，`VLLM_API_KEY` 仅作为可选认证头。
@@ -61,7 +62,7 @@
   - 该示例用于解耦 MinerU 解析与视觉阶段，避免 GPU 和视觉卡互相空转；已通过 `main.py` 暴露路由，可直接在现有服务中访问 `/two_stage/*`，也可按需用独立入口部署。
   - 两段式解析中如 MinerU 抛异常或未生成 `_content_list.json`，`parse_doc` 会直接抛出 `RuntimeError`，并将异常继续冒泡，`two_stage.parse` 会捕获并带上源文件路径返回给 Flower，避免再出现 “cannot unpack non-iterable NoneType object” 之类的报错。视觉阶段与 `/mineru_with_images` 对齐：`provider`/`model`/`prompt`（空字符串会清空为 None）会透传给 `vision_completion`，可通过请求参数或 `VISION_PROVIDER`/`VISION_MODEL` 环境变量指定模型；路由层使用 `VisionProvider`/`VisionModel` 进行校验，Swagger 会给出枚举提示。视觉调用若抛异常，`two_stage.vision` 现在会直接失败，不再回写 `base_text` 兜底。  
   - 视觉合并规则：若原图有 caption/footnote 则合并为 `<原文本>\n<视觉输出>`（不再添加 “Image Description:” 前缀）；无原始文本时直接用视觉输出，`chunk_type=true` 时图片块标记为 `type="image"`，标题/页眉/页脚仍按原规则打标，视觉输出会清理 `[Page N]`/`[ChunkType=...]` 标记以保证纯文本干净。视觉调用前会过滤图片：面积占比过小（默认 <1%，有 caption 放宽到 0.5%）、极端长宽比（>10:1）、无 caption 且体积过小（默认 <10KB）、固有分辨率过小（最短边 <96px 或像素面积过小）直接跳过；同页超过 5 张也会限流，并按文件哈希去重，减少 logo/边框等噪声送入视觉模型。  
-- PM2 模板：`ecosystem.config.json` 仅作为轻量 API 入口模板，当前收敛为 `gunicorn -w 4 --timeout 300 --graceful-timeout 60 --keep-alive 30 --max-requests 500 --max-requests-jitter 50`，避免 HTTP worker 放大同步 MinerU 解析进程树；大吞吐解析应走 Celery/two-stage 队列。`ecosystem.vllm.config.json`、`ecosystem.vllm.parallele.config.json`、`ecosystem.vllm.quatro.json` 均配置 PM2 `max_restarts`、`min_uptime`、`exp_backoff_restart_delay`、`kill_timeout`，防止 vLLM 启动失败时形成重启风暴。`ecosystem.two_stage.celery.json`（parse/vision/dispatch/merge worker 监听 urgent+normal 队列，按 `-Q` 顺序优先消费：`queue_parse_urgent,queue_parse_gpu`；`queue_vision_urgent,queue_vision`；`queue_dispatch_urgent,queue_dispatch`；`queue_merge_urgent,default`）；`ecosystem.two_stage.flower.json`（两段式 Flower，默认 5556 端口，继承两段式队列环境）。
+- PM2 模板：`ecosystem.config.json` 仅作为 API 入口模板，当前收敛为 `gunicorn -w 4 --timeout 1900 --graceful-timeout 1900 --keep-alive 30 --max-requests 500 --max-requests-jitter 50`，确保同步 MinerU 解析的大文件请求优先由 `MINERU_*_HARD_TIMEOUT_SECONDS` 控制，不会被 Gunicorn 300/60 秒窗口提前误杀；大吞吐解析仍应走 Celery/two-stage 队列，避免 HTTP worker 长时间占用。`ecosystem.vllm.config.json`、`ecosystem.vllm.parallele.config.json`、`ecosystem.vllm.quatro.json` 均配置 PM2 `max_restarts`、`min_uptime`、`exp_backoff_restart_delay`、`kill_timeout`，防止 vLLM 启动失败时形成重启风暴。`ecosystem.two_stage.celery.json`（parse/vision/dispatch/merge worker 监听 urgent+normal 队列，按 `-Q` 顺序优先消费：`queue_parse_urgent,queue_parse_gpu`；`queue_vision_urgent,queue_vision`；`queue_dispatch_urgent,queue_dispatch`；`queue_merge_urgent,default`）；`ecosystem.two_stage.flower.json`（两段式 Flower，默认 5556 端口，继承两段式队列环境）。
 
 ## 配置与敏感信息
 - 所有默认配置来自 `.secrets/secrets.toml`，通过 `src/config/config.py` 读取；文件顶部会先 `load_dotenv()`，确保 `.env` 环境变量优先级更高（容器/CI 可直接覆盖）。敏感字段包括 FASTAPI Bearer Token、OpenAI/Gemini/VLLM API Key 等。
@@ -129,6 +130,7 @@
 - 图像增强流程的 `_log_vision_prompt` 使用 `logger.debug` 输出前后文，默认不会污染 info 级日志，如需调试可上调日志级别。
 - 建议通过 `/health` 做存活探测，`/gpu/status` 监控排队，MinIO 接口应配合真实服务验证。
 - 解析路径经常涉及临时文件，注意及时释放；`gpu_scheduler` 已在 finally 中做清理，但新增逻辑时需保持一致。
+- 运维清理解析残留进程时，不要按运行时长或进程名全局误杀；应先确认当前 PM2/Gunicorn master 子树，只清理已经脱离当前服务树且匹配本项目解析命令行的 orphan 进程。
 - VS Code 调试配置（`.vscode/launch.json` 中的 `UnstructureServe`）已关闭 `.venv/**`、`input/**`、`output/**`、`pdfs/**` 等大目录的 reload 监听，以加快首启扫描。
 
 ## 常见运维提示

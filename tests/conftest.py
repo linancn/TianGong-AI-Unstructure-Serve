@@ -94,7 +94,7 @@ def app():
             future.set_result({"result": []})
             return future
 
-        def shutdown(self, wait: bool = True):
+        def shutdown(self, wait: bool = True, cancel_futures: bool = False):
             pass
 
     concurrent.futures.ProcessPoolExecutor = DummyProcessPoolExecutor

@@ -1,5 +1,6 @@
 import logging
 import sys
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +21,7 @@ from src.routers import (
     two_stage_router,
     gpu_router,
 )
+from src.services.gpu_scheduler import scheduler
 
 load_dotenv()
 
@@ -42,6 +44,14 @@ for noisy_logger in ("httpx", "httpcore"):
 bearer_scheme = HTTPBearer()
 
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    try:
+        yield
+    finally:
+        scheduler.shutdown(wait=True)
+
+
 def validate_token(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
     if credentials.scheme != "Bearer" or credentials.credentials != FASTAPI_BEARER_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid or missing token")
@@ -53,6 +63,7 @@ app = FastAPI(
     version="1.0",
     description="TianGong AI Unstructure API Server",
     dependencies=[Depends(validate_token)] if FASTAPI_AUTH else None,
+    lifespan=lifespan,
 )
 
 origins = ["*"]
