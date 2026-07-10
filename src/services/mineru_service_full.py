@@ -12,6 +12,7 @@ from loguru import logger
 from mineru.cli.common import do_parse as mineru_do_parse
 from mineru.cli.common import read_fn
 
+from src.services.pdf_text_layer_reconcile import reconcile_content_list_checkboxes
 from src.utils.mineru_backend import normalize_backend, resolve_backend, resolve_backend_from_env
 
 DEFAULT_VLLM_SERVER_URL = "http://127.0.0.1:30000"
@@ -295,6 +296,7 @@ def parse_doc(
                 )
 
             last_content_list = _load_content_list(content_list_path)
+            reconcile_content_list_checkboxes(last_content_list, file_path)
             last_local_output_dir = str(content_list_path.parent)
 
         if last_content_list is None or last_local_output_dir is None:
