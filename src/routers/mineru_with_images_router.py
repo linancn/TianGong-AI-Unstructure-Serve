@@ -229,8 +229,6 @@ async def mineru_with_images(
                     "type": item_type,
                 }
             )
-        if chunk_type:
-            ordered_chunks.sort(key=lambda ch: (0 if ch["type"] == "header" else 1))
         items = [
             TextElementWithPageNum(
                 text=chunk["text"],

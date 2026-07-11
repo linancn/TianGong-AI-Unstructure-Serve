@@ -401,9 +401,6 @@ def _merge_content(
                     chunk["type"] = "image"
                 result_items.append(chunk)
 
-    if chunk_type:
-        result_items.sort(key=lambda ch: 0 if ch.get("type") == "header" else 1)
-
     items = [
         TextElementWithPageNum(
             text=chunk["text"],

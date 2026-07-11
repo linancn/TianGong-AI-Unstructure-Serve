@@ -116,3 +116,38 @@ def test_mineru_with_images_invalid_model_no_longer_returns_422(client, monkeypa
     assert captured["pipeline"] == "images"
     assert captured["kwargs"]["vision_provider"] == "missing-provider"
     assert captured["kwargs"]["vision_model"] == "missing-model"
+
+
+def test_mineru_with_images_keeps_mineru_reading_order_when_chunk_type_enabled(client, monkeypatch):
+    def fake_submit(*args, **kwargs):
+        future = concurrent.futures.Future()
+        future.set_result(
+            {
+                "result": [
+                    {"text": "Page 1 header", "page_number": 1, "type": "header"},
+                    {"text": "Page 1 body", "page_number": 1},
+                    {"text": "Page 2 header", "page_number": 2, "type": "header"},
+                    {"text": "Page 2 body", "page_number": 2},
+                ]
+            }
+        )
+        return future
+
+    monkeypatch.setattr(router, "resolve_backend_from_env", lambda: "vlm-http-client")
+    monkeypatch.setattr(router.scheduler, "submit", fake_submit)
+
+    response = client.post(
+        "/mineru_with_images",
+        params={"chunk_type": "true", "return_txt": "true"},
+        files={"file": ("sample.pdf", b"%PDF-1.4\n", "application/pdf")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["text"] for item in payload["result"]] == [
+        "Page 1 header",
+        "Page 1 body",
+        "Page 2 header",
+        "Page 2 body",
+    ]
+    assert payload["txt"] == "Page 1 header\nPage 1 body\nPage 2 header\nPage 2 body"

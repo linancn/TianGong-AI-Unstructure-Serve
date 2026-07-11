@@ -126,3 +126,27 @@ def test_vision_task_raises_when_completion_fails(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Vision call failed for seq=7"):
         two_stage_pipeline.vision_task.run(job, provider="vllm", model="demo-model")
+
+
+def test_two_stage_merge_keeps_mineru_reading_order_when_chunk_type_enabled():
+    content_list = [
+        {"type": "header", "text": "Page 1 header", "page_idx": 0},
+        {"type": "text", "text": "Page 1 body", "page_idx": 0},
+        {"type": "header", "text": "Page 2 header", "page_idx": 1},
+        {"type": "text", "text": "Page 2 body", "page_idx": 1},
+    ]
+
+    items, txt_text = two_stage_pipeline._merge_content(
+        content_list,
+        [],
+        chunk_type=True,
+        return_txt=True,
+    )
+
+    assert [(item.text, item.page_number, item.type) for item in items] == [
+        ("Page 1 header", 1, "header"),
+        ("Page 1 body", 1, None),
+        ("Page 2 header", 2, "header"),
+        ("Page 2 body", 2, None),
+    ]
+    assert txt_text == "Page 1 header\nPage 1 body\nPage 2 header\nPage 2 body"
